@@ -1,9 +1,0 @@
-ERROR: pip's dependency resolver does not currently take into account all the packages that are installed. This behaviour is the source of the following dependency conflicts.
-learning-spark 0.1.0 requires grpcio-status>=1.74.0, but you have grpcio-status 1.71.2 which is incompatible.
-dbt-adapters 1.24.5 requires protobuf<7.0,>=6.0, but you have protobuf 5.29.6 which is incompatible.
-dbt-common 1.38.0 requires protobuf<7.0,>=6.0, but you have protobuf 5.29.6 which is incompatible.
-dbt-core 1.12.0 requires protobuf<8.0,>=6.0, but you have protobuf 5.29.6 which is incompatible.
-WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager, possibly rendering your system unusable. It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv. Use the --root-user-action option if you know what you are doing and want to suppress this warning.
-
-[notice] A new release of pip is available: 25.0.1 -> 26.2.1
-[notice] To update, run: pip install --upgrade pip
