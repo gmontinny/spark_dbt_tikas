@@ -38,9 +38,14 @@ def _clean_text(text: str) -> str:
 
 
 def _embed(text: str) -> list[float]:
+    from functools import lru_cache
     from sentence_transformers import SentenceTransformer
-    model = SentenceTransformer(EMBEDDING_MODEL)
-    return model.encode(text[:2048], normalize_embeddings=True).tolist()
+
+    @lru_cache(maxsize=1)
+    def _get_model(name: str):
+        return SentenceTransformer(name)
+
+    return _get_model(EMBEDDING_MODEL).encode(text[:2048], normalize_embeddings=True).tolist()
 
 
 def run() -> None:

@@ -48,11 +48,14 @@ MESSAGE_SCHEMA = StructType([
 def _classify(text: str) -> str:
     if not text:
         return "desconhecido"
+    from functools import lru_cache
     from transformers import pipeline
-    classifier = pipeline(
-        "zero-shot-classification", model=CLASSIFIER_MODEL,
-    )
-    return classifier(text[:512], candidate_labels=TOPICS, truncation=True)["labels"][0]
+
+    @lru_cache(maxsize=1)
+    def _get_classifier(name: str):
+        return pipeline("zero-shot-classification", model=name)
+
+    return _get_classifier(CLASSIFIER_MODEL)(text[:512], candidate_labels=TOPICS, truncation=True)["labels"][0]
 
 
 def _ts(v) -> str | None:

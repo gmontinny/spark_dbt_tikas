@@ -86,7 +86,7 @@ dbt-tika: ## dbt: transforma resultados LLM em marts analíticos
 	docker compose exec dev bash -c "cd dbt_project && dbt run --profiles-dir . && dbt test --profiles-dir ."
 
 rag: ## RAG: pergunta sobre os documentos via LLM
-	@read -p "Pergunta: " q; docker compose exec dev python /workspace/jobs/rag_query.py --question "$$q"
+	@docker compose exec dev python /workspace/jobs/rag_query.py --question "$(Q)"
 
 streaming: ## Inferência contínua via Structured Streaming (Kafka → StarRocks)
 	docker compose exec spark-connect python /opt/spark/work-dir/jobs/streaming_inference.py

@@ -39,6 +39,7 @@ def _get_conn():
         host=STARROCKS_HOST, port=int(STARROCKS_PORT),
         user=STARROCKS_USER,
         password=os.getenv("STARROCKS_PASSWORD", ""),
+        database=STARROCKS_DB,
     )
 
 

@@ -208,20 +208,20 @@ O pipeline detecta automaticamente os novos arquivos.
 ## Comandos disponíveis
 
 ```bash
-make help          # Lista todos os comandos disponíveis
-make up            # Sobe todos os serviços
-make down          # Para todos os serviços
-make pipeline-tika # Pipeline completo: Bronze → Silver → Gold
-make bronze        # Apenas extração Tika
-make silver        # Apenas features + embeddings
-make gold          # Apenas inferência LLM → StarRocks
-make dbt-tika      # Transformações dbt + testes de qualidade
-make app           # Interface RAG (Streamlit)
-make streaming     # Inferência contínua via Kafka
-make finetune      # Fine-tuning distribuído (TorchDistributor)
-make rag           # Pergunta via CLI (sem interface web)
-make logs          # Logs de todos os containers
-make rebuild       # Rebuild completo das imagens
+make help              # Lista todos os comandos disponíveis
+make up                # Sobe todos os serviços
+make down              # Para todos os serviços
+make pipeline-tika     # Pipeline completo: Bronze → Silver → Gold
+make bronze            # Apenas extração Tika
+make silver            # Apenas features + embeddings
+make gold              # Apenas inferência LLM → StarRocks
+make dbt-tika          # Transformações dbt + testes de qualidade
+make app               # Interface RAG (Streamlit)
+make streaming         # Inferência contínua via Kafka
+make finetune          # Fine-tuning distribuído (TorchDistributor)
+make rag Q="pergunta"  # Pergunta via CLI (sem interface web)
+make logs              # Logs de todos os containers
+make rebuild           # Rebuild completo das imagens
 ```
 
 ---
@@ -453,6 +453,16 @@ Verifique se o Ollama está rodando no host: `ollama list`. O container acessa v
 
 **Modelo HuggingFace não baixa**
 Os modelos são baixados automaticamente na primeira execução. Verifique a conexão com a internet e o espaço em disco.
+
+**Erro `shapes (384,) and (768,) not aligned` no RAG**
+O Silver foi gerado com um modelo de embeddings diferente do atual. Reprocesse:
+```bash
+make silver
+```
+Isso acontece ao trocar `EMBEDDING_MODEL` no `.env`. O modelo padrão é `PORTULAN/serafim-100m-portuguese-pt-sentence-encoder` (768 dims).
+
+**Gemini retorna erro de conflito de protobuf**
+O SDK `google-generativeai` conflita com o PySpark 4.x. O projeto já usa Gemini via HTTP direto — certifique-se de que `PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=python` está no `.env`.
 
 ---
 

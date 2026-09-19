@@ -108,9 +108,8 @@ def run() -> None:
     data = df.toPandas().to_dict("records")
     log.info("📦 %d documentos carregados para fine-tuning", len(data))
 
-    spark.stop()
-
     # TorchDistributor — executa _train_fn distribuído nos workers Spark
+    # Nota: spark.stop() NÃO pode ser chamado antes do distributor.run()
     distributor = TorchDistributor(
         num_processes=NUM_WORKERS,
         local_mode=NUM_WORKERS == 1,
@@ -118,6 +117,7 @@ def run() -> None:
     )
     distributor.run(_train_fn, data, EPOCHS, BASE_MODEL, MODEL_OUTPUT)
     log.info("✅ Fine-tuning distribuído concluído")
+    spark.stop()
 
 
 if __name__ == "__main__":
