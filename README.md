@@ -111,7 +111,7 @@ Os embeddings são gerados com o modelo **PORTULAN/serafim-100m-portuguese-pt-se
 | LLM — geração de texto | OpenAI GPT-4o-mini / Google Gemini / Ollama |
 | Interface RAG | Streamlit |
 | Dashboards | Apache Superset |
-| Linguagem | Python 3.12 |
+| Linguagem | Python 3.10 |
 | Gerenciador de pacotes | uv |
 
 ---
@@ -269,7 +269,7 @@ make rag Q="pergunta"  # Pergunta via CLI (sem interface web)
 │   ├── dbt_project.yml
 │   └── profiles.yml
 ├── .devcontainer/
-│   └── Dockerfile                  # Imagem do container dev (Python 3.12 + uv)
+│   └── Dockerfile                  # Imagem do container dev (Python 3.10 + uv)
 ├── spark-connect/                  # Configuração do Spark Connect
 ├── hive-metastore/                 # Configuração do Hive Metastore
 ├── trino/                          # Catálogo Trino (hive)
@@ -411,6 +411,40 @@ Resposta fundamentada nos documentos
 ```
 
 O modelo responde com base no conteúdo dos documentos. Se a informação não estiver disponível, informa explicitamente.
+
+### Exemplos de perguntas para testar o RAG
+
+Os documentos de exemplo em `datas/` cobrem economia imobiliária, índices de preços e obras públicas. Use as perguntas abaixo para validar o pipeline:
+
+**Boletim Econômico ABRAINC — 2º trimestre 2025**
+```bash
+make rag Q="Qual foi o crescimento do PIB Construção no primeiro semestre de 2025?"
+make rag Q="Quais são os principais desafios para o crédito imobiliário em 2025?"
+make rag Q="Qual foi a variação da Agropecuária no período analisado?"
+make rag Q="O que o INCC indica sobre os custos de construção?"
+```
+
+**FipeZap — venda residencial agosto 2026**
+```bash
+make rag Q="Qual foi a variação do índice FipeZap de venda residencial em agosto de 2026?"
+make rag Q="Quais cidades tiveram maior variação de preço no FipeZap?"
+make rag Q="Como evoluiu o preço médio de imóveis residenciais em agosto de 2026?"
+```
+
+**IPOP — obras públicas dezembro 2025**
+```bash
+make rag Q="Qual foi a variação do índice PAV em dezembro de 2025?"
+make rag Q="Qual índice teve a maior variação em dezembro de 2025 segundo o IPOP?"
+make rag Q="O que aconteceu com o índice de escolas em dezembro de 2025?"
+```
+
+**Perguntas cruzadas entre documentos**
+```bash
+make rag Q="Como estão os custos de construção civil no Brasil em 2025?"
+make rag Q="Qual é o cenário do mercado imobiliário brasileiro em 2025?"
+```
+
+> **Dica:** perguntas mais específicas e próximas do vocabulário do documento retornam respostas mais precisas. Se o RAG responder "Não encontrei essa informação", tente reformular com termos presentes no texto original.
 
 ---
 
