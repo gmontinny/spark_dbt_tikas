@@ -98,7 +98,7 @@ Os embeddings são gerados com o modelo **PORTULAN/serafim-100m-portuguese-pt-se
 
 | Categoria | Tecnologia |
 |---|---|
-| Processamento distribuído | Apache Spark 4.x (Connect mode) |
+| Processamento distribuído | Apache Spark 4.0.1 (Connect mode) |
 | Extração de documentos | Apache Tika 2.x (REST) |
 | Object store | MinIO (S3-compatible) |
 | Catálogo de metadados | Hive Metastore + PostgreSQL |
