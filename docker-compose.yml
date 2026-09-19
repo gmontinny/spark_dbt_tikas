@@ -231,6 +231,8 @@ services:
       - TIKA_SERVER_JAR=http://tika-server:9998
     env_file:
       - .env
+    ports:
+      - "8501:8501"
     command: sleep infinity
     depends_on:
       - spark-connect

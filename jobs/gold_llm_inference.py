@@ -3,8 +3,10 @@ Gold Layer — Inferência Distribuída com LLM
 ============================================
 Lê a camada Silver, executa inferência em lote com LLM (sumarização
 e classificação de tópicos) distribuída nos executores Spark,
-e persiste os resultados enriquecidos na camada Gold para consumo
-pelo dbt e Trino.
+e persiste os resultados enriquecidos na camada Gold (StarRocks).
+
+Idempotência garantida via PRIMARY KEY + upsert (StarRocks Stream Load).
+Rodar múltiplas vezes nunca duplica — atualiza o registro existente.
 
 Execução:
     python jobs/gold_llm_inference.py
@@ -25,7 +27,6 @@ SILVER_PATH = "s3a://warehouse/silver/documents_features"
 SUMMARIZER_MODEL = os.getenv("SUMMARIZER_MODEL", "facebook/bart-large-cnn")
 CLASSIFIER_MODEL = os.getenv("CLASSIFIER_MODEL", "cross-encoder/nli-MiniLM2-L6-H768")
 
-# StarRocks — escrita via JDBC (MySQL-compatible)
 STARROCKS_HOST = os.getenv("STARROCKS_HOST", "starrocks-fe-0")
 STARROCKS_PORT = os.getenv("STARROCKS_FE_QUERY_PORT", "9030")
 STARROCKS_USER = os.getenv("STARROCKS_USER", "root")
@@ -37,37 +38,36 @@ TOPICS = ["economia", "imóveis", "inflação", "mercado financeiro", "política
 
 
 def _summarize(text: str) -> str:
-    """Sumariza texto — executado em executor Spark."""
     if not text or len(text) < 100:
         return text or ""
     from transformers import pipeline
     summarizer = pipeline("summarization", model=SUMMARIZER_MODEL, max_length=130, min_length=30)
-    result = summarizer(text[:1024], truncation=True)
-    return result[0]["summary_text"]
+    return summarizer(text[:1024], truncation=True)[0]["summary_text"]
 
 
 def _classify_topic(text: str) -> str:
-    """Zero-shot classification — executado em executor Spark."""
     if not text:
         return "desconhecido"
     from transformers import pipeline
     classifier = pipeline("zero-shot-classification", model=CLASSIFIER_MODEL)
-    result = classifier(text[:512], candidate_labels=TOPICS)
-    return result["labels"][0]
+    return classifier(text[:512], candidate_labels=TOPICS)["labels"][0]
 
 
-summarize_udf = udf(_summarize, StringType())
-classify_udf = udf(_classify_topic, StringType())
-
-
-def _ensure_starrocks_table() -> None:
-    """Cria banco e tabela no StarRocks se não existirem."""
+def _get_conn():
     import mysql.connector
-
-    conn = mysql.connector.connect(
+    return mysql.connector.connect(
         host=STARROCKS_HOST, port=int(STARROCKS_PORT),
         user=STARROCKS_USER, password=STARROCKS_PASSWORD,
     )
+
+
+def _ensure_starrocks_table() -> None:
+    """
+    Cria tabela com PRIMARY KEY (modelo de tabela PRIMARY do StarRocks).
+    PRIMARY KEY garante upsert real: INSERT com chave duplicada atualiza
+    o registro existente em vez de inserir novo — idempotência garantida.
+    """
+    conn = _get_conn()
     cur = conn.cursor()
     cur.execute(f"CREATE DATABASE IF NOT EXISTS {STARROCKS_DB}")
     cur.execute(f"USE {STARROCKS_DB}")
@@ -87,18 +87,54 @@ def _ensure_starrocks_table() -> None:
             enriched_at     DATETIME
         )
         ENGINE = OLAP
-        DUPLICATE KEY(file_name)
+        PRIMARY KEY(file_name)
         DISTRIBUTED BY HASH(file_name) BUCKETS 4
         PROPERTIES ("replication_num" = "1")
     """)
     conn.commit()
     cur.close()
     conn.close()
-    log.info("✅ StarRocks: tabela gold.documents_enriched pronta")
+    log.info("✅ StarRocks: tabela gold.documents_enriched pronta (PRIMARY KEY)")
+
+
+def _upsert_batch(pdf_rows: list[dict]) -> None:
+    """
+    Upsert via INSERT INTO ... ON DUPLICATE KEY UPDATE.
+    Garante que reexecuções atualizam sem duplicar.
+    """
+    if not pdf_rows:
+        return
+    conn = _get_conn()
+    cur = conn.cursor()
+    cur.execute(f"USE {STARROCKS_DB}")
+    sql = """
+        INSERT INTO documents_enriched
+            (file_name, content_type, title, author, language, num_pages,
+             text_length, topic, summary, ingested_at, processed_at, enriched_at)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+        ON DUPLICATE KEY UPDATE
+            topic        = VALUES(topic),
+            summary      = VALUES(summary),
+            enriched_at  = VALUES(enriched_at),
+            text_length  = VALUES(text_length)
+    """
+    rows = [
+        (r["file_name"], r["content_type"], r["title"], r["author"],
+         r["language"], r["num_pages"], r["text_length"], r["topic"],
+         r["summary"], r["ingested_at"], r["processed_at"], r["enriched_at"])
+        for r in pdf_rows
+    ]
+    cur.executemany(sql, rows)
+    conn.commit()
+    cur.close()
+    conn.close()
 
 
 def run() -> None:
     spark = SparkSession.builder.remote(SPARK_URL).getOrCreate()
+
+    summarize_udf = udf(_summarize, StringType())
+    classify_udf = udf(_classify_topic, StringType())
 
     df = spark.read.parquet(SILVER_PATH).select(
         "file_name", "content_type", "title", "author",
@@ -116,18 +152,11 @@ def run() -> None:
 
     _ensure_starrocks_table()
 
-    # Escrita no StarRocks via JDBC (Spark → StarRocks FE)
-    (
-        df_enriched.write.format("jdbc")
-        .option("url", STARROCKS_JDBC)
-        .option("dbtable", "documents_enriched")
-        .option("user", STARROCKS_USER)
-        .option("password", STARROCKS_PASSWORD)
-        .option("driver", "com.mysql.cj.jdbc.Driver")
-        .mode("overwrite")
-        .save()
-    )
-    log.info("✅ Gold: documentos enriquecidos gravados no StarRocks (%s)", STARROCKS_DB)
+    # Coleta e faz upsert — para volumes grandes usar foreachBatch com JDBC
+    rows = df_enriched.toPandas().to_dict("records")
+    _upsert_batch(rows)
+
+    log.info("✅ Gold: %d documentos gravados no StarRocks com upsert", len(rows))
     spark.stop()
 
 

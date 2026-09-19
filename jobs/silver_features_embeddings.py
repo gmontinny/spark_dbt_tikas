@@ -14,15 +14,7 @@ import os
 import re
 
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import (
-    col,
-    current_timestamp,
-    length,
-    lower,
-    regexp_replace,
-    trim,
-    udf,
-)
+from pyspark.sql.functions import col, current_timestamp, length, lower, trim, udf
 from pyspark.sql.types import ArrayType, FloatType, StringType
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -51,12 +43,13 @@ def _embed(text: str) -> list[float]:
     return vec.tolist()
 
 
-embed_udf = udf(_embed, ArrayType(FloatType()))
-clean_udf = udf(_clean_text, StringType())
-
-
 def run() -> None:
     spark = SparkSession.builder.remote(SPARK_URL).getOrCreate()
+
+    # UDFs registradas APÓS a criação da sessão (obrigatório no Spark Connect)
+    clean_udf = udf(_clean_text, StringType())
+    embed_udf = udf(_embed, ArrayType(FloatType()))
+
     spark.sql(f"CREATE DATABASE IF NOT EXISTS {DATABASE}")
 
     df = spark.read.parquet(BRONZE_PATH)
@@ -68,7 +61,7 @@ def run() -> None:
         .filter(col("text_length") > 50)
     )
 
-    # TF-IDF via MLlib (feature engineering clássico)
+    # TF-IDF via MLlib
     from pyspark.ml.feature import HashingTF, IDF, Tokenizer
 
     tokenizer = Tokenizer(inputCol="text_clean", outputCol="words")
@@ -85,7 +78,7 @@ def run() -> None:
 
     (
         df_embedded
-        .drop("text_content")  # texto bruto fica no Bronze
+        .drop("text_content")
         .withColumn("processed_at", current_timestamp())
         .write.format("parquet")
         .option("path", SILVER_PATH)

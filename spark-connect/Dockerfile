@@ -16,7 +16,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       sentence-transformers>=2.2.0 \
       torch>=2.0.0 \
       transformers>=4.30.0 \
-      numpy && \
+      numpy \
+      mysql-connector-python && \
     ln -sf /usr/bin/python3 /usr/bin/python && \
     rm -rf /var/lib/apt/lists/*
 

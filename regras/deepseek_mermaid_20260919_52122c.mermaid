@@ -1,24 +1,58 @@
 graph TD
-    subgraph "Ingestão e Extração"
-        A[Arquivos Brutos<br>PDF, DOCX, etc.] --> B[Apache Tika<br>Extração de Texto e Metadados]
+    subgraph "Fontes de Dados"
+        A[📁 datas/<br>PDF, DOCX, TXT, ...]
     end
 
-    subgraph "Camada Bronze (Dados Brutos)"
-        B --> C[Spark DataFrame<br>com Texto Extraído]
-        C --> D[Armazenamento<br>HDFS / Object Store]
+    subgraph "Camada Bronze"
+        A --> B[Apache Tika REST<br>:9998]
+        B --> C[Spark 4.x Connect<br>Extração de texto e metadados]
+        C --> D[(MinIO<br>s3a://warehouse/bronze<br>hive.bronze.documents)]
     end
 
-    subgraph "Camada Silver (Processamento de IA)"
-        D --> E[Spark 4.0<br>Data Prep e Feature Eng.]
-        E --> F[Embeddings<br>ai.embed / SentenceTransformers]
-        E --> G[Ajuste Fino<br>TorchDistributor / DeepSpeed]
-        E --> H[Inferência Distribuída<br>Batch / Streaming]
+    subgraph "Camada Silver — Feature Engineering & Deep Learning"
+        D --> E[Spark 4.x<br>Limpeza e Normalização]
+        E --> F[TF-IDF<br>Spark MLlib]
+        E --> G[Embeddings Semânticos<br>SentenceTransformers<br>UDF Distribuída]
+        F --> H[(MinIO<br>s3a://warehouse/silver<br>hive.silver.documents_features)]
+        G --> H
     end
 
-    subgraph "Camada Gold (Análise e Consulta)"
-        F --> I[dbt<br>Modelagem e Transformação]
-        G --> I
-        H --> I
-        I --> J[Trino<br>Consulta de Alto Desempenho]
-        J --> K[Aplicações e Dashboards]
+    subgraph "Camada Gold — LLM Inference"
+        H --> I[Spark 4.x<br>Inferência Distribuída]
+        I --> J[Sumarização<br>facebook/bart-large-cnn]
+        I --> K[Classificação Zero-Shot<br>cross-encoder/nli-MiniLM2-L6-H768]
+        J --> L[(StarRocks OLAP<br>:9030<br>gold.documents_enriched)]
+        K --> L
+    end
+
+    subgraph "dbt — Modelagem Analítica"
+        L --> M[stg_documents_enriched<br>view]
+        M --> N[mart_documents_by_topic<br>table OLAP]
+        M --> O[mart_document_summaries<br>table OLAP]
+    end
+
+    subgraph "IA Generativa — RAG"
+        H --> P[rag_query.py<br>Cosine Similarity<br>nos Embeddings Silver]
+        P --> Q[TOP-K Chunks<br>mais relevantes]
+        Q --> R[Mistral-7B<br>Prompt + Contexto]
+        R --> S[💬 Streamlit RAG<br>http://localhost:8501]
+    end
+
+    subgraph "Streaming — Inferência Contínua"
+        T[Kafka<br>tika.documents] --> U[Structured Streaming<br>Spark 4.x<br>micro-batch 30s]
+        U --> V[Classificação<br>Zero-Shot em RT]
+        V --> W[(StarRocks<br>gold.documents_stream)]
+    end
+
+    subgraph "Fine-Tuning Distribuído"
+        H --> X[TorchDistributor<br>Spark 4.x<br>Barrier Execution]
+        X --> Y[DistilBERT Multilingual<br>Ajuste Fino nos docs]
+        Y --> Z[(MinIO<br>s3a://warehouse/models/)]
+    end
+
+    subgraph "Visualização & Consulta"
+        N --> AA[Superset<br>:8088<br>Dashboards]
+        O --> S
+        D --> AB[Trino<br>:8080<br>Bronze & Silver]
+        L --> AC[DataGrip / MySQL Client<br>StarRocks :9030]
     end
