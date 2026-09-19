@@ -1,0 +1,89 @@
+[project]
+name = "learning-spark"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "pyspark>=4.0.0",
+    "minio>=7.1.0",
+    "kafka-python>=2.0.2",
+    "psycopg2-binary>=2.9.0",
+    "redis>=4.5.0",
+    "requests>=2.28.0",
+    "pandas>=1.5.0",
+    "pyarrow>=10.0.0",
+    "streamlit>=1.49.1",
+    "confluent-kafka>=2.11.1",
+    "python-dotenv>=1.1.1",
+    "mysql-connector-python>=8.0.0",
+    "grpcio>=1.74.0",
+    "grpcio-status>=1.74.0",
+    "zstandard>=0.25.0",
+    "matplotlib>=3.5.0",
+    "seaborn>=0.11.0",
+    "numpy>=1.21.0",
+    "scikit-learn>=1.0.0",
+    "trino>=0.328.0",
+    "dbt-trino>=1.8.0",
+    "dbt-starrocks>=1.3.0",
+    "tika>=2.6.0",
+    "sentence-transformers>=2.2.0",
+    "torch>=2.0.0",
+    "transformers>=4.30.0",
+    "langchain>=0.1.0",
+    "langchain-community>=0.0.20",
+]
+
+[dependency-groups]
+# Installed by default in dev with `uv sync` (see [tool.uv] below)
+dev = [
+    "pre-commit==4.2.0",
+    "black",
+    "pytest",
+    "ruff",
+    "isort",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build]
+# Include your package files (adjust paths as needed)
+include = ["*.py", "src/**/*.py"]
+
+# ----------------------------
+# Tool configuration
+# ----------------------------
+
+[tool.uv]
+# Make `uv sync` include the "dev" group by default in your devcontainer
+default-groups = ["dev"]
+
+[tool.ruff]
+# Lint + (optionally) format with Ruff
+line-length = 140
+target-version = "py310"
+# Enable Pyflakes + pycodestyle subset + import sorting
+select = ["E", "F", "I"]
+ignore = ["F821", "E402"]
+exclude = [".git", "__pycache__", "build", "dist", "setup.py"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+
+[tool.black]
+line-length = 90
+target-version = ["py310"]
+
+[tool.isort]
+profile = "black"
+multi_line_output = 3
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]

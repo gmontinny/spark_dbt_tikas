@@ -1,0 +1,13 @@
+spark_dbt_tikas:
+  target: dev
+  outputs:
+    dev:
+      type: starrocks
+      host: "{{ env_var('STARROCKS_HOST', 'starrocks-fe-0') }}"
+      port: "{{ env_var('STARROCKS_FE_QUERY_PORT', '9030') | int }}"
+      schema: gold
+      username: "{{ env_var('STARROCKS_USER', 'root') }}"
+      password: "{{ env_var('STARROCKS_PASSWORD', '') }}"
+      threads: 4
+      catalog: default_catalog
+      database: gold

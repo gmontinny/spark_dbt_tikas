@@ -1,0 +1,51 @@
+{
+  "name": "spark-pyspark-dev",
+  "dockerComposeFile": ["../docker-compose.yml"],
+  "service": "dev",
+  "runServices": [
+    "zookeeper", "kafka", "schema-registry",
+    "minio", "minio-client", "superset",
+    "spark-connect", "postgres", "hive-metastore", "trino",
+    "tika-server", "starrocks-fe-0", "starrocks-be-0"
+  ],
+  "features": {
+
+	},
+  "workspaceFolder": "/workspace",
+  "overrideCommand": false,
+  "updateRemoteUserUID": true,
+  "envFile": "../.env",
+
+  "customizations": {
+
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-toolsai.jupyter",
+        "ms-python.vscode-pylance",
+        "charliermarsh.ruff",
+        "GitHub.copilot",
+        "ms-azuretools.vscode-docker",
+        "tamasfe.even-better-toml",
+        "ms-toolsai.datawrangler"
+      ],
+      "settings": {
+        "python.defaultInterpreterPath": "/workspace/.venv/bin/python",
+        "python.analysis.typeCheckingMode": "basic",
+        "ruff.enable": true,
+        "python.testing.pytestEnabled": true,
+        "python.terminal.activateEnvironment": true
+      }
+    },
+
+    "jetbrains": {
+      "ide": "pycharm"
+    },
+
+  },
+
+  "postCreateCommand": "uv sync --locked  && uv run pre-commit install",
+  "mounts": [
+    "source=uv-cache,target=/root/.cache/uv,type=volume"
+  ]
+}

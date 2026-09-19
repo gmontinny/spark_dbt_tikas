@@ -1,0 +1,24 @@
+graph TD
+    subgraph "Ingestão e Extração"
+        A[Arquivos Brutos<br>PDF, DOCX, etc.] --> B[Apache Tika<br>Extração de Texto e Metadados]
+    end
+
+    subgraph "Camada Bronze (Dados Brutos)"
+        B --> C[Spark DataFrame<br>com Texto Extraído]
+        C --> D[Armazenamento<br>HDFS / Object Store]
+    end
+
+    subgraph "Camada Silver (Processamento de IA)"
+        D --> E[Spark 4.0<br>Data Prep e Feature Eng.]
+        E --> F[Embeddings<br>ai.embed / SentenceTransformers]
+        E --> G[Ajuste Fino<br>TorchDistributor / DeepSpeed]
+        E --> H[Inferência Distribuída<br>Batch / Streaming]
+    end
+
+    subgraph "Camada Gold (Análise e Consulta)"
+        F --> I[dbt<br>Modelagem e Transformação]
+        G --> I
+        H --> I
+        I --> J[Trino<br>Consulta de Alto Desempenho]
+        J --> K[Aplicações e Dashboards]
+    end

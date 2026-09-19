@@ -1,0 +1,26 @@
+name: spark_dbt_tikas
+version: "1.0.0"
+config-version: 2
+
+profile: spark_dbt_tikas
+
+model-paths: ["models"]
+macro-paths: ["macros"]
+test-paths: ["tests"]
+
+target-path: "target"
+clean-targets: ["target", "dbt_packages"]
+
+models:
+  spark_dbt_tikas:
+    staging:
+      +schema: silver
+      +materialized: view
+    gold:
+      +schema: gold
+      +materialized: table
+      +engine: OLAP
+      +distributed_by: HASH(file_name)
+      +buckets: 4
+      +properties:
+        replication_num: "1"

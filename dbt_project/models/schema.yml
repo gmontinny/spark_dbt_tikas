@@ -1,0 +1,37 @@
+version: 2
+
+models:
+  - name: stg_documents_enriched
+    description: "Staging: documentos extraídos pelo Tika e enriquecidos pelo LLM"
+    columns:
+      - name: file_name
+        description: "Nome do arquivo original"
+        tests:
+          - not_null
+          - unique
+      - name: topic
+        description: "Tópico classificado pelo LLM (zero-shot)"
+        tests:
+          - not_null
+      - name: summary
+        description: "Sumarização gerada pelo LLM"
+
+  - name: mart_documents_by_topic
+    description: "Mart analítico: documentos com métricas por tópico"
+    columns:
+      - name: file_name
+        tests:
+          - not_null
+      - name: topic
+        tests:
+          - not_null
+
+  - name: mart_document_summaries
+    description: "Mart de sumarizações para RAG e busca semântica"
+    columns:
+      - name: file_name
+        tests:
+          - not_null
+      - name: summary
+        tests:
+          - not_null
