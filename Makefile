@@ -1,7 +1,7 @@
 # The name of the Docker Compose file
 COMPOSE_FILE = docker-compose.yml
 
-.PHONY: help up down rebuild logs browse ml-demo analise otimizacao ml-all ingest dbt-run dbt-test connect-ingest submit-ingest bronze silver gold pipeline-tika dbt-tika
+.PHONY: help up down rebuild logs browse ml-demo analise otimizacao ml-all ingest dbt-run dbt-test connect-ingest submit-ingest bronze silver gold pipeline-tika dbt-tika rag streaming finetune app
 
 help: ## Show this help message
 	@echo 'Usage: make [target]'

@@ -14,13 +14,12 @@ clean-targets: ["target", "dbt_packages"]
 models:
   spark_dbt_tikas:
     staging:
-      +schema: gold
       +materialized: view
     gold:
-      +schema: gold
       +materialized: table
       +engine: OLAP
-      +distributed_by: HASH(file_name)
+      +distributed_by:
+        - file_name
       +buckets: 4
       +properties:
         replication_num: "1"

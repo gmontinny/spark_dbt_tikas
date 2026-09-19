@@ -16,9 +16,13 @@ com arquitetura de medalhas (Bronze → Silver → Gold) e IA Generativa (RAG + 
 │                         CAMADA BRONZE                                   │
 │                                                                         │
 │  Apache Tika (REST :9998)                                               │
-│  ├── Extração de texto completo                                         │
-│  ├── Extração de metadados (autor, título, páginas, idioma)             │
+│  ├── Extração de texto completo  (endpoint /tika)                       │
+│  ├── Extração de metadados       (endpoint /meta)                       │
+│  │   autor, título, páginas, idioma, data de criação                    │
 │  └── Suporte a PDF, DOCX, PPTX, XLSX, HTML, TXT                        │
+│                                                                         │
+│  Nota: tika-python 3.x requer duas chamadas separadas:                  │
+│    service="text" → conteúdo  |  service="meta" → metadados             │
 │                                                                         │
 │  Spark 4.x Connect → Parquet → MinIO (s3a://warehouse/bronze)          │
 │  Catálogo: hive.bronze.documents  (consultável via Trino)               │
@@ -43,16 +47,19 @@ com arquitetura de medalhas (Bronze → Silver → Gold) e IA Generativa (RAG + 
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                          CAMADA GOLD                                    │
 │                                                                         │
-│  Spark 4.x — Inferência Distribuída com LLMs                           │
+│  Spark 4.x — Inferência com LLMs (executada no driver após collect)    │
 │  ├── Sumarização (facebook/bart-large-cnn)                              │
-│  │   └── Gera resumo de cada documento via UDF Spark                   │
+│  │   └── BartForConditionalGeneration — geração direta sem pipeline()  │
 │  └── Classificação zero-shot (cross-encoder/nli-MiniLM2-L6-H768)       │
 │      └── Classifica tópico sem treinamento supervisionado               │
 │                                                                         │
-│  Escrita via JDBC → StarRocks OLAP (:9030)                             │
-│  └── gold.documents_enriched                                            │
+│  Escrita via mysql-connector-python → StarRocks OLAP (:9030)           │
+│  └── gold.documents_enriched  (PRIMARY KEY — upsert nativo)            │
 │                                                                         │
-│  dbt (adapter: starrocks) — Modelagem Analítica                        │
+│  Nota: StarRocks PRIMARY KEY faz upsert automático com INSERT simples.  │
+│  ON DUPLICATE KEY UPDATE não é suportado pelo StarRocks.                │
+│                                                                         │
+│  dbt (adapter: starrocks 1.12.2) — Modelagem Analítica                 │
 │  ├── stg_documents_enriched      (staging / view)                      │
 │  ├── mart_documents_by_topic     (tabela OLAP por tópico)              │
 │  └── mart_document_summaries     (tabela para RAG/busca semântica)     │
@@ -72,7 +79,7 @@ com arquitetura de medalhas (Bronze → Silver → Gold) e IA Generativa (RAG + 
 │  4. TOP-K chunks          │  └────────────────────────────────────────┘
 │     mais relevantes       │
 │  5. Prompt + contexto     │  ┌────────────────────────────────────────┐
-│     → Mistral-7B          │  │         FINE-TUNING                    │
+│     → OPT-125M           │  │         FINE-TUNING                    │
 │  6. Resposta gerada       │  │                                        │
 │     fundamentada nos docs │  │  TorchDistributor (Spark 4.x)         │
 │                           │  │  ├── Barrier execution distribuído     │
@@ -86,7 +93,7 @@ com arquitetura de medalhas (Bronze → Silver → Gold) e IA Generativa (RAG + 
 │                          VISUALIZAÇÃO                                   │
 │                                                                         │
 │  Superset (:8088)   — Dashboards sobre marts Gold (StarRocks)          │
-│  Trino UI (:8080)   — Exploração ad-hoc Bronze e Silver                │
+│  Trino UI (:8080)   — Exploração ad-hoc Bronze e Silver (catálogo hive)│
 │  Streamlit (:8501)  — Interface RAG (perguntas sobre documentos)       │
 │  MinIO UI (:9001)   — Exploração dos arquivos Parquet                  │
 └─────────────────────────────────────────────────────────────────────────┘
@@ -94,18 +101,18 @@ com arquitetura de medalhas (Bronze → Silver → Gold) e IA Generativa (RAG + 
 
 ## Serviços
 
-| Serviço          | Porta   | Descrição                                          |
-|------------------|---------|----------------------------------------------------|
-| tika-server      | 9998    | Apache Tika REST — extração de texto e metadados   |
+| Serviço          | Porta   | Descrição                                            |
+|------------------|---------|------------------------------------------------------|
+| tika-server      | 9998    | Apache Tika REST — extração de texto e metadados     |
 | spark-connect    | 15002   | Spark 4.x Connect (gRPC) — processamento distribuído |
-| starrocks-fe-0   | 9030    | StarRocks FE — query engine OLAP (camada Gold)     |
-| starrocks-be-0   | 8040    | StarRocks BE — storage e execução                  |
-| trino            | 8080    | Query engine ad-hoc (camadas Bronze e Silver)      |
-| hive-metastore   | 9083    | Catálogo de tabelas Bronze e Silver                |
-| minio            | 9000/01 | Object store — Bronze, Silver e modelos            |
-| kafka            | 9092    | Broker para inferência em streaming                |
-| superset         | 8088    | Dashboards analíticos                              |
-| postgres         | 5432    | Backend do Hive Metastore                          |
+| starrocks-fe-0   | 9030    | StarRocks FE — query engine OLAP (camada Gold)       |
+| starrocks-be-0   | 8040    | StarRocks BE — storage e execução                    |
+| trino            | 8080    | Query engine ad-hoc (camadas Bronze e Silver)        |
+| hive-metastore   | 9083    | Catálogo de tabelas Bronze e Silver                  |
+| minio            | 9000/01 | Object store — Bronze, Silver e modelos              |
+| kafka            | 9092    | Broker para inferência em streaming                  |
+| superset         | 8088    | Dashboards analíticos                                |
+| postgres         | 5432    | Backend do Hive Metastore                            |
 
 ## Execução
 
@@ -132,7 +139,7 @@ make streaming
 make finetune
 
 # Etapas individuais do pipeline:
-make bronze   # Extração Tika
+make bronze   # Extração Tika (texto + metadados)
 make silver   # Features + Embeddings
 make gold     # Inferência LLM → StarRocks
 ```
@@ -141,13 +148,15 @@ make gold     # Inferência LLM → StarRocks
 
 | Arquivo                              | Camada    | Descrição                                              |
 |--------------------------------------|-----------|--------------------------------------------------------|
-| `jobs/bronze_tika_ingest.py`         | Bronze    | Extrai texto e metadados via Apache Tika REST          |
+| `jobs/bronze_tika_ingest.py`         | Bronze    | Extrai texto (service=text) e metadados (service=meta) via Tika REST |
 | `jobs/silver_features_embeddings.py` | Silver    | TF-IDF (MLlib) + embeddings semânticos distribuídos    |
-| `jobs/gold_llm_inference.py`         | Gold      | Sumarização + classificação zero-shot → StarRocks      |
-| `jobs/rag_query.py`                  | IA Gen.   | RAG: cosine similarity + Mistral-7B gera resposta      |
+| `jobs/gold_llm_inference.py`         | Gold      | Sumarização (BART) + classificação zero-shot → StarRocks |
+| `jobs/rag_query.py`                  | IA Gen.   | RAG: cosine similarity + OPT-125M gera resposta        |
 | `jobs/streaming_inference.py`        | Streaming | Inferência contínua Kafka → StarRocks (Structured Streaming) |
 | `jobs/finetune_distributed.py`       | IA Gen.   | Fine-tuning distribuído com TorchDistributor (Spark 4.x) |
 | `jobs/pipeline_run.py`               | All       | Orquestrador Bronze → Silver → Gold                    |
+
+> Scripts de diagnóstico e protótipos estão em `jobs/debug/` e não fazem parte do pipeline de produção.
 
 ## IA Generativa — Detalhes
 
@@ -159,12 +168,12 @@ Pergunta → Embedding (SentenceTransformers)
          → Cosine Similarity nos embeddings do Silver
          → TOP-K chunks mais relevantes
          → Prompt com contexto
-         → Mistral-7B gera resposta fundamentada nos documentos
+         → OPT-125M gera resposta fundamentada nos documentos
 ```
 
 Configurável via `.env`:
 ```env
-LLM_MODEL=mistralai/Mistral-7B-Instruct-v0.2
+LLM_MODEL=facebook/opt-125m
 RAG_TOP_K=3
 ```
 
@@ -178,6 +187,7 @@ O `streaming_inference.py` usa Structured Streaming do Spark 4.x:
 O `finetune_distributed.py` usa o **TorchDistributor** do Spark 4.x:
 - Barrier execution garante sincronização entre workers
 - Ajusta DistilBERT multilingual nos documentos da camada Silver
+- Seeds fixos (`random`, `numpy`, `torch`) garantem reprodutibilidade
 - Modelo salvo em `s3a://warehouse/models/topic_classifier`
 
 ## dbt (camada Gold — StarRocks)
@@ -185,7 +195,7 @@ O `finetune_distributed.py` usa o **TorchDistributor** do Spark 4.x:
 ```bash
 cd dbt_project
 dbt run --profiles-dir .    # cria marts analíticos no StarRocks
-dbt test --profiles-dir .   # valida qualidade dos dados
+dbt test --profiles-dir .   # valida qualidade dos dados (7 testes)
 ```
 
 ### Modelos dbt
@@ -195,6 +205,13 @@ dbt test --profiles-dir .   # valida qualidade dos dados
 | `stg_documents_enriched`    | view   | Staging normalizado dos documentos enriquecidos  |
 | `mart_documents_by_topic`   | table  | Métricas analíticas por tópico (para Superset)   |
 | `mart_document_summaries`   | table  | Sumarizações prontas para RAG e busca semântica  |
+
+### Notas de compatibilidade dbt-starrocks
+
+- `+distributed_by` deve ser uma **lista YAML** (`- file_name`), não string — o adapter monta `HASH()` automaticamente
+- `+schema` não deve ser definido nos modelos — o database `gold` do `profiles.yml` já determina o schema destino
+- Modelos com `ref()` dentro de CTEs precisam do hint `-- depends_on: {{ ref('...') }}` no topo do arquivo
+- StarRocks `PRIMARY KEY` faz upsert nativo com `INSERT` simples — `ON DUPLICATE KEY UPDATE` não é suportado
 
 ## Variáveis de Ambiente (.env)
 
@@ -214,28 +231,30 @@ STARROCKS_DB=gold
 EMBEDDING_MODEL=sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
 SUMMARIZER_MODEL=facebook/bart-large-cnn
 CLASSIFIER_MODEL=cross-encoder/nli-MiniLM2-L6-H768
-LLM_MODEL=mistralai/Mistral-7B-Instruct-v0.2
-RAG_TOP_K=3
+LLM_MODEL=facebook/opt-125m
 ```
 
 ## Acesso via DataGrip (ou qualquer SQL client)
 
 ### Trino — camadas Bronze e Silver
-| Campo    | Valor                                      |
-|----------|--------------------------------------------|
-| Driver   | Trino                                      |
-| Host     | `localhost`                                |
-| Port     | `8080`                                     |
-| User     | `admin` (qualquer string, sem autenticação)|
-| Password | *(vazio)*                                  |
-| Catalog  | `hive`                                     |
+
+> Trino expõe apenas o catálogo `hive`. As tabelas Bronze e Silver são Parquet/Hive — não Iceberg.
+
+| Campo    | Valor                                       |
+|----------|---------------------------------------------|
+| Driver   | Trino                                       |
+| Host     | `localhost`                                 |
+| Port     | `8080`                                      |
+| User     | `admin` (qualquer string, sem autenticação) |
+| Password | *(vazio)*                                   |
+| Catalog  | `hive`                                      |
 
 ```sql
 -- Schemas disponíveis
 SHOW SCHEMAS FROM hive;
 
--- Bronze: documentos extraídos pelo Tika
-SELECT file_name, content_type, language, num_pages, ingested_at
+-- Bronze: documentos extraídos pelo Tika (texto + metadados)
+SELECT file_name, content_type, author, language, num_pages, ingested_at
 FROM hive.bronze.documents;
 
 -- Silver: features e embeddings gerados pelo Spark
@@ -244,14 +263,15 @@ FROM hive.silver.documents_features;
 ```
 
 ### StarRocks — camada Gold
-| Campo    | Valor                              |
-|----------|------------------------------------|
-| Driver   | MySQL (StarRocks é MySQL-compatible)|
-| Host     | `localhost`                        |
-| Port     | `9030`                             |
-| User     | `root`                             |
-| Password | *(vazio)*                          |
-| Database | `gold`                             |
+
+| Campo    | Valor                               |
+|----------|-------------------------------------|
+| Driver   | MySQL (StarRocks é MySQL-compatible) |
+| Host     | `localhost`                         |
+| Port     | `9030`                              |
+| User     | `root`                              |
+| Password | *(vazio)*                           |
+| Database | `gold`                              |
 
 ```sql
 -- Documentos enriquecidos pelo LLM
@@ -276,10 +296,11 @@ LIMIT 20;
 ```
 
 ### Outros serviços
-| Serviço    | URL                   | Credenciais              |
-|------------|-----------------------|--------------------------|
+
+| Serviço    | URL                   | Credenciais                 |
+|------------|-----------------------|-----------------------------|
 | MinIO      | http://localhost:9001 | `minioadmin` / `minioadmin` |
-| Superset   | http://localhost:8088 | `admin` / `admin`        |
-| Streamlit  | http://localhost:8501 | sem autenticação         |
-| Spark UI   | http://localhost:4040 | sem autenticação         |
-| Trino UI   | http://localhost:8080 | sem autenticação         |
+| Superset   | http://localhost:8088 | `admin` / `admin`           |
+| Streamlit  | http://localhost:8501 | sem autenticação            |
+| Spark UI   | http://localhost:4040 | sem autenticação            |
+| Trino UI   | http://localhost:8080 | sem autenticação            |

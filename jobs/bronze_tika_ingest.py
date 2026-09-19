@@ -56,24 +56,25 @@ def _str(v) -> str:
 
 def extract_with_tika(file_path: Path) -> dict:
     """
-    Extrai texto e metadados via tika-python em modo cliente REST.
-    service="text" usa o endpoint /tika que retorna conteúdo corretamente
-    na versão 3.x da biblioteca.
+    Extrai texto via endpoint /tika (service='text') e metadados via
+    endpoint /meta (service='meta'). Duas chamadas são necessárias pois
+    service='text' não retorna metadados e service='all' não retorna conteúdo.
     """
-    parsed = tika_parser.from_file(
-        str(file_path),
-        serverEndpoint=TIKA_ENDPOINT,
-        service="text",
+    text_result = tika_parser.from_file(
+        str(file_path), serverEndpoint=TIKA_ENDPOINT, service="text",
     )
-    meta = parsed.get("metadata", {}) or {}
+    meta_result = tika_parser.from_file(
+        str(file_path), serverEndpoint=TIKA_ENDPOINT, service="meta",
+    )
+    meta = meta_result.get("metadata") or {}
     return {
         "file_name": file_path.name,
         "content_type": _str(meta.get("Content-Type", "")),
-        "text_content": (parsed.get("content") or "").strip(),
-        "author": _str(meta.get("Author", meta.get("dc:creator", ""))),
-        "title": _str(meta.get("title", meta.get("dc:title", ""))),
-        "created": _str(meta.get("Creation-Date", meta.get("dcterms:created", ""))),
-        "language": _str(meta.get("language", "")),
+        "text_content": (text_result.get("content") or "").strip(),
+        "author": _str(meta.get("dc:creator", meta.get("pdf:docinfo:creator", meta.get("Author", "")))),
+        "title": _str(meta.get("dc:title", meta.get("title", ""))),
+        "created": _str(meta.get("dcterms:created", meta.get("Creation-Date", ""))),
+        "language": _str(meta.get("dc:language", meta.get("language", ""))),
         "num_pages": _str(meta.get("xmpTPg:NPages", meta.get("Page-Count", ""))),
     }
 
@@ -92,7 +93,9 @@ def run() -> None:
     for f in files:
         log.info("  → %s", f.name)
         row = extract_with_tika(f)
-        log.info("    texto: %d chars", len(row["text_content"]))
+        log.info("    texto: %d chars | autor: %s | páginas: %s | idioma: %s",
+                 len(row["text_content"]), row["author"] or "(vazio)",
+                 row["num_pages"] or "(vazio)", row["language"] or "(vazio)")
         rows.append(row)
 
     df = spark.createDataFrame(

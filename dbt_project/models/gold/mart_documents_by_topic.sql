@@ -1,4 +1,5 @@
 -- gold/mart_documents_by_topic.sql
+-- depends_on: {{ ref('stg_documents_enriched') }}
 -- Tabela analítica: documentos agrupados por tópico com métricas de conteúdo.
 -- Consumida pelo StarRocks + Superset.
 

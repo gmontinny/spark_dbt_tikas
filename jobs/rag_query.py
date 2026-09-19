@@ -4,14 +4,15 @@ RAG — Retrieval-Augmented Generation
 Etapa 1 — Retrieval: busca os chunks mais relevantes nos embeddings
            gerados na camada Silver (cosine similarity).
 Etapa 2 — Augmented Generation: monta prompt com o contexto recuperado
-           e envia para um LLM (Mistral-7B via HuggingFace ou OpenAI)
+           e envia para um LLM leve (facebook/opt-125m, ~250MB)
            que gera uma resposta fundamentada nos documentos.
+
+O modelo padrão é facebook/opt-125m para garantir execução em CPU
+com memória limitada. Modelos maiores podem ser configurados via
+LLM_MODEL no .env, desde que a máquina tenha recursos suficientes.
 
 Execução standalone:
     python jobs/rag_query.py --question "Qual foi a variação do IPCA em dezembro?"
-
-Execução via Spark Connect (busca distribuída em grandes volumes):
-    python jobs/rag_query.py --question "..." --spark
 """
 
 import argparse
@@ -26,7 +27,7 @@ log = logging.getLogger(__name__)
 SPARK_URL = os.getenv("SPARK_CONNECT_URL", "sc://localhost:15002")
 SILVER_PATH = os.getenv("SILVER_PATH", "s3a://warehouse/silver/documents_features")
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
-LLM_MODEL = os.getenv("LLM_MODEL", "mistralai/Mistral-7B-Instruct-v0.2")
+LLM_MODEL = os.getenv("LLM_MODEL", "facebook/opt-125m")
 TOP_K = int(os.getenv("RAG_TOP_K", "3"))
 
 
@@ -83,14 +84,16 @@ def generate(question: str, chunks: list[dict]) -> str:
 
     log.info("Carregando LLM %s...", LLM_MODEL)
     tokenizer = AutoTokenizer.from_pretrained(LLM_MODEL)
+    dtype = torch.float16 if torch.cuda.is_available() else torch.float32
     model = AutoModelForCausalLM.from_pretrained(
         LLM_MODEL,
-        torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
-        device_map="auto",
+        dtype=dtype,
+        low_cpu_mem_usage=True,
     )
-    inputs = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=3072).to(model.device)
+    model.eval()
+    inputs = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=512).to(model.device)
     with torch.inference_mode():
-        output = model.generate(**inputs, max_new_tokens=512, temperature=0.3, do_sample=True)
+        output = model.generate(**inputs, max_new_tokens=256, do_sample=False)
     response = tokenizer.decode(output[0][inputs["input_ids"].shape[1]:], skip_special_tokens=True)
     return response.strip()
 

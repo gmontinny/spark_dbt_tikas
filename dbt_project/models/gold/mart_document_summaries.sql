@@ -1,4 +1,5 @@
 -- gold/mart_document_summaries.sql
+-- depends_on: {{ ref('stg_documents_enriched') }}
 -- Tabela de sumarizações geradas pelo LLM, pronta para RAG e busca semântica.
 -- Armazenada no StarRocks para consulta de baixa latência.
 
