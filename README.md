@@ -10,6 +10,8 @@ Este projeto demonstra uma arquitetura moderna de dados aplicada a documentos n�
 
 O usuário pode fazer perguntas em linguagem natural sobre os documentos e receber respostas fundamentadas no conteúdo real — usando **OpenAI**, **Google Gemini** ou **Ollama** (local, sem custo) como LLM.
 
+Os embeddings são gerados com o modelo **PORTULAN/serafim-100m-portuguese-pt-sentence-encoder**, especializado em português, garantindo alta precisão na recuperação semântica de documentos em língua portuguesa.
+
 ---
 
 ## Arquitetura
@@ -39,9 +41,11 @@ O usuário pode fazer perguntas em linguagem natural sobre os documentos e receb
 │                                                                         │
 │  Spark 4.x — Feature Engineering                                       │
 │  ├── Limpeza e normalização de texto (UDF distribuída)                  │
+│  │   └── Remove artefatos de PDF, espaços, caracteres especiais        │
 │  ├── TF-IDF via Spark MLlib (HashingTF + IDF)                          │
-│  └── Embeddings semânticos distribuídos                                 │
-│      └── SentenceTransformers (paraphrase-multilingual-MiniLM-L12-v2)  │
+│  └── Embeddings semânticos em português                                 │
+│      └── PORTULAN/serafim-100m-portuguese-pt-sentence-encoder          │
+│          (modelo especializado em português — GPU acelerado)            │
 │                                                                         │
 │  Spark 4.x Connect → Parquet → MinIO (s3a://warehouse/silver)          │
 │  Catálogo: hive.silver.documents_features  (consultável via Trino)     │
@@ -72,10 +76,10 @@ O usuário pode fazer perguntas em linguagem natural sobre os documentos e receb
 │                           │  │  Kafka → Structured Streaming          │
 │  1. Pergunta do usuário   │  │  ├── Consome tópico tika.documents     │
 │  2. Embed da pergunta     │  │  ├── Classificação zero-shot em        │
-│     (SentenceTransformers)│  │  │   tempo real (micro-batch 30s)      │
+│     (PORTULAN serafim)    │  │  │   tempo real (micro-batch 30s)      │
 │  3. Cosine similarity     │  │  └── Grava em StarRocks                │
 │     nos embeddings Silver │  │      gold.documents_stream             │
-│  4. TOP-K chunks          │  └────────────────────────────────────────┘
+│  4. TOP-K documentos      │  └────────────────────────────────────────┘
 │     mais relevantes       │
 │  5. Prompt + contexto     │  ┌────────────────────────────────────────┐
 │     → LLM (OpenAI /       │  │         FINE-TUNING                    │
@@ -102,7 +106,7 @@ O usuário pode fazer perguntas em linguagem natural sobre os documentos e receb
 | OLAP / Data Warehouse | StarRocks |
 | Modelagem analítica | dbt (adapter starrocks) |
 | Streaming | Apache Kafka + Spark Structured Streaming |
-| Embeddings | SentenceTransformers (HuggingFace) |
+| Embeddings (português) | PORTULAN serafim-100m (HuggingFace) |
 | LLM — geração de texto | OpenAI GPT-4o-mini / Google Gemini / Ollama |
 | Interface RAG | Streamlit |
 | Dashboards | Apache Superset |
@@ -118,6 +122,11 @@ O usuário pode fazer perguntas em linguagem natural sobre os documentos e receb
 - [Docker Compose](https://docs.docker.com/compose/install/) v2+
 - 16 GB de RAM disponível (recomendado: 32 GB)
 - 20 GB de espaço em disco
+
+### GPU (opcional, mas recomendado)
+O projeto detecta automaticamente a GPU via CUDA. Se disponível, os embeddings são gerados na GPU — significativamente mais rápido. O `docker-compose.yml` já está configurado com `deploy.resources` para passar a GPU NVIDIA ao container.
+
+Requisito: [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html) instalado no host.
 
 ### Para o LLM (escolha uma opção)
 
@@ -150,16 +159,9 @@ Abra o `.env` e configure o provider de LLM desejado:
 # Escolha: openai | gemini | ollama
 LLM_PROVIDER=ollama
 
-# Se usar Ollama (instale em https://ollama.com e execute: ollama pull llama3.1)
-LLM_MODEL=llama3.1
-
-# Se usar OpenAI
-# LLM_PROVIDER=openai
-# OPENAI_API_KEY=sk-...
-
-# Se usar Gemini
-# LLM_PROVIDER=gemini
-# GEMINI_API_KEY=AIza...
+# Temperatura: 0.0 = preciso/determinístico | 1.0 = criativo
+# Para RAG recomenda-se entre 0.0 e 0.2
+LLM_TEMPERATURE=0.1
 ```
 
 ### 3. Suba os serviços
@@ -245,7 +247,7 @@ make rebuild       # Rebuild completo das imagens
 ├── datas/                          # Documentos de entrada (PDF, DOCX, TXT)
 ├── jobs/
 │   ├── bronze_tika_ingest.py       # Extração Tika → MinIO (Bronze)
-│   ├── silver_features_embeddings.py # TF-IDF + embeddings (Silver)
+│   ├── silver_features_embeddings.py # TF-IDF + embeddings PORTULAN (Silver)
 │   ├── gold_llm_inference.py       # Sumarização + classificação (Gold)
 │   ├── rag_query.py                # RAG: busca semântica + geração LLM
 │   ├── streaming_inference.py      # Inferência contínua Kafka → StarRocks
@@ -277,8 +279,6 @@ make rebuild       # Rebuild completo das imagens
 ## Consultando os dados
 
 ### Trino — camadas Bronze e Silver
-
-Conecte com qualquer cliente SQL (DBeaver, DataGrip, etc.):
 
 | Campo | Valor |
 |---|---|
@@ -318,19 +318,31 @@ ORDER BY enriched_at DESC;
 SELECT topic, topic_total_docs, topic_avg_text_length
 FROM gold.mart_documents_by_topic
 ORDER BY topic_total_docs DESC;
-
--- Inferência em streaming (tempo real)
-SELECT file_name, topic, classified_at
-FROM gold.documents_stream
-ORDER BY classified_at DESC
-LIMIT 20;
 ```
 
 ---
 
 ## Configuração do LLM
 
-O provider é configurado pela variável `LLM_PROVIDER` no `.env`. Não é necessário recriar o container — a alteração é lida a cada execução.
+O provider é configurado pela variável `LLM_PROVIDER` no `.env`. **Não é necessário recriar o container** — a alteração é lida a cada execução.
+
+### Trocar de provider
+
+Edite apenas uma linha no `.env`:
+
+```env
+LLM_PROVIDER=openai    # ou: gemini | ollama
+```
+
+### Temperatura
+
+Controla o comportamento do modelo na geração de respostas:
+
+```env
+LLM_TEMPERATURE=0.1   # 0.0 = determinístico/preciso | 1.0 = criativo
+```
+
+Para RAG recomenda-se entre `0.0` e `0.2` — o modelo deve extrair informações dos documentos, não inventar.
 
 ### Ollama (gratuito, local)
 
@@ -373,16 +385,17 @@ Outros modelos Gemini disponíveis: `gemini-2.5-flash`, `gemini-2.5-pro`, `gemin
 Pergunta do usuário
       │
       ▼
-Embedding da pergunta (SentenceTransformers — roda no container)
+Embedding da pergunta
+(PORTULAN/serafim-100m — modelo especializado em português)
       │
       ▼
 Cosine Similarity contra embeddings da camada Silver
       │
       ▼
-TOP-K chunks mais relevantes (padrão: 3)
+TOP-K documentos mais relevantes (padrão: 3)
       │
       ▼
-Prompt estruturado em português + contexto dos chunks
+Prompt estruturado em português + contexto dos documentos
       │
       ▼
 LLM escolhido (OpenAI / Gemini / Ollama) gera a resposta
@@ -391,7 +404,7 @@ LLM escolhido (OpenAI / Gemini / Ollama) gera a resposta
 Resposta fundamentada nos documentos
 ```
 
-O modelo responde **apenas com base no conteúdo dos documentos**. Se a informação não estiver nos documentos, o modelo informa explicitamente.
+O modelo responde com base no conteúdo dos documentos. Se a informação não estiver disponível, informa explicitamente.
 
 ---
 
@@ -404,7 +417,6 @@ O modelo responde **apenas com base no conteúdo dos documentos**. Se a informa�
 | `mart_document_summaries` | table | Sumarizações prontas para RAG e busca semântica |
 
 ```bash
-# Executar modelos e testes
 cd dbt_project
 dbt run --profiles-dir .
 dbt test --profiles-dir .
@@ -416,9 +428,9 @@ dbt test --profiles-dir .
 
 | Configuração | RAM | Disco | Observação |
 |---|---|---|---|
-| Mínima | 16 GB | 20 GB | Sem Ollama local |
+| Mínima | 16 GB | 20 GB | Sem Ollama local, sem GPU |
 | Recomendada | 32 GB | 40 GB | Com Ollama local |
-| Ideal | 32 GB + GPU | 60 GB | GPU acelera embeddings |
+| Ideal | 32 GB + GPU NVIDIA | 60 GB | GPU acelera embeddings (RTX 3060+) |
 
 ---
 
@@ -426,12 +438,15 @@ dbt test --profiles-dir .
 
 **Containers não sobem / ficam em `unhealthy`**
 ```bash
-make logs          # Verifique os logs
-make down && make up  # Reinicie tudo
+make logs
+make down && make up
 ```
 
 **Erro de memória no Spark**
 Edite `spark-connect/conf/spark-defaults.conf` e reduza `spark.executor.memory`.
+
+**GPU não detectada no container**
+Verifique se o [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html) está instalado e reinicie o Docker Desktop.
 
 **Ollama não responde**
 Verifique se o Ollama está rodando no host: `ollama list`. O container acessa via `host.docker.internal:11434`.

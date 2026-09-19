@@ -226,6 +226,13 @@ services:
       - .:/workspace
       - uv-cache:/root/.cache/uv
     working_dir: /workspace
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
     environment:
       - SPARK_CONNECT_URL=sc://spark-connect:15002
       - TIKA_SERVER_JAR=http://tika-server:9998

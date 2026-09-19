@@ -35,6 +35,7 @@ OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
 TOP_K = int(os.getenv("RAG_TOP_K", "3"))
+LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.1"))
 
 
 def _cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
@@ -72,12 +73,12 @@ def retrieve(question: str, docs: list[dict]) -> list[dict]:
 
 def _build_prompt(question: str, chunks: list[dict]) -> str:
     context = "\n\n".join(
-        f"[{c['file_name']}]\n{c['text_clean'][:3000]}" for c in chunks
+        f"[{c['file_name']}]\n{c['text_clean'][:12000]}" for c in chunks
     )
     return (
         "Você é um assistente especializado em análise de documentos em português brasileiro.\n"
-        "Com base APENAS nos trechos abaixo, responda à pergunta de forma clara e objetiva.\n"
-        "Se a informação não estiver nos trechos, diga exatamente: "
+        "Responda à pergunta com base nos trechos abaixo. Seja direto e objetivo.\n"
+        "Use apenas informações presentes nos trechos. Se não houver informação suficiente, diga: "
         "'Não encontrei essa informação nos documentos.'\n\n"
         f"Trechos:\n{context}\n\n"
         f"Pergunta: {question}\n\n"
@@ -89,7 +90,7 @@ def _generate_ollama(prompt: str) -> str:
     log.info("Chamando Ollama (%s) em %s...", LLM_MODEL, OLLAMA_URL)
     resp = requests.post(
         f"{OLLAMA_URL}/api/generate",
-        json={"model": LLM_MODEL, "prompt": prompt, "stream": False},
+        json={"model": LLM_MODEL, "prompt": prompt, "stream": False, "options": {"temperature": LLM_TEMPERATURE}},
         timeout=120,
     )
     resp.raise_for_status()
@@ -103,7 +104,7 @@ def _generate_openai(prompt: str) -> str:
     resp = client.chat.completions.create(
         model=OPENAI_MODEL,
         messages=[{"role": "user", "content": prompt}],
-        temperature=0.2,
+        temperature=LLM_TEMPERATURE,
     )
     return resp.choices[0].message.content.strip()
 
@@ -111,7 +112,10 @@ def _generate_openai(prompt: str) -> str:
 def _generate_gemini(prompt: str) -> str:
     log.info("Chamando Gemini (%s)...", GEMINI_MODEL)
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
-    payload = {"contents": [{"parts": [{"text": prompt}]}]}
+    payload = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {"temperature": LLM_TEMPERATURE},
+    }
     resp = requests.post(url, json=payload, timeout=60)
     resp.raise_for_status()
     return resp.json()["candidates"][0]["content"]["parts"][0]["text"].strip()

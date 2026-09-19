@@ -2,8 +2,8 @@
 Silver Layer — Feature Engineering e Embeddings
 ================================================
 Lê a camada Bronze, realiza limpeza/normalização de texto,
-gera embeddings via SentenceTransformers (distribuído com Spark UDF)
-e persiste na camada Silver com tipo VARIANT-like (array<float>).
+gera embeddings semânticos com SentenceTransformers
+e persiste na camada Silver.
 
 Execução:
     python jobs/silver_features_embeddings.py
@@ -20,33 +20,32 @@ from pyspark.sql.types import ArrayType, FloatType, StringType
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger(__name__)
 
-SPARK_URL = os.getenv("SPARK_CONNECT_URL", "sc://localhost:15002")
-BRONZE_PATH = "s3a://warehouse/bronze/documents"
-SILVER_PATH = "s3a://warehouse/silver/documents_features"
-EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
-DATABASE = "silver"
+SPARK_URL       = os.getenv("SPARK_CONNECT_URL", "sc://localhost:15002")
+BRONZE_PATH     = "s3a://warehouse/bronze/documents"
+SILVER_PATH     = "s3a://warehouse/silver/documents_features"
+EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "PORTULAN/serafim-100m-portuguese-pt-sentence-encoder")
+DATABASE        = "silver"
 
 
 def _clean_text(text: str) -> str:
     if not text:
         return ""
+    text = text.replace("\xa0", " ")
+    text = re.sub(r"\s*32;\s*", " ", text)
     text = re.sub(r"\s+", " ", text)
     text = re.sub(r"[^\w\s\.,;:!?\-àáâãéêíóôõúüçÀÁÂÃÉÊÍÓÔÕÚÜÇ]", " ", text)
-    return text.strip()
+    return re.sub(r"\s+", " ", text).strip()
 
 
 def _embed(text: str) -> list[float]:
-    """Gera embedding — executado em cada executor Spark."""
     from sentence_transformers import SentenceTransformer
     model = SentenceTransformer(EMBEDDING_MODEL)
-    vec = model.encode(text[:512], normalize_embeddings=True)
-    return vec.tolist()
+    return model.encode(text[:2048], normalize_embeddings=True).tolist()
 
 
 def run() -> None:
     spark = SparkSession.builder.remote(SPARK_URL).getOrCreate()
 
-    # UDFs registradas APÓS a criação da sessão (obrigatório no Spark Connect)
     clean_udf = udf(_clean_text, StringType())
     embed_udf = udf(_embed, ArrayType(FloatType()))
 
@@ -64,16 +63,15 @@ def run() -> None:
     # TF-IDF via MLlib
     from pyspark.ml.feature import HashingTF, IDF, Tokenizer
 
-    tokenizer = Tokenizer(inputCol="text_clean", outputCol="words")
+    tokenizer  = Tokenizer(inputCol="text_clean", outputCol="words")
     hashing_tf = HashingTF(inputCol="words", outputCol="raw_features", numFeatures=512)
-    idf = IDF(inputCol="raw_features", outputCol="tfidf_features")
+    idf        = IDF(inputCol="raw_features", outputCol="tfidf_features")
 
-    df_words = tokenizer.transform(df_clean)
-    df_tf = hashing_tf.transform(df_words)
+    df_words  = tokenizer.transform(df_clean)
+    df_tf     = hashing_tf.transform(df_words)
     idf_model = idf.fit(df_tf)
-    df_tfidf = idf_model.transform(df_tf).drop("words", "raw_features")
+    df_tfidf  = idf_model.transform(df_tf).drop("words", "raw_features")
 
-    # Embeddings semânticos distribuídos
     df_embedded = df_tfidf.withColumn("embedding", embed_udf(col("text_clean")))
 
     (
@@ -85,7 +83,7 @@ def run() -> None:
         .mode("overwrite")
         .saveAsTable(f"{DATABASE}.documents_features")
     )
-    log.info("✅ Silver: features e embeddings gravados em %s", SILVER_PATH)
+    log.info("✅ Silver: embeddings gravados em %s", SILVER_PATH)
     spark.stop()
 
 

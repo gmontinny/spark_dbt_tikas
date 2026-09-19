@@ -63,7 +63,7 @@ with st.sidebar:
 
 # ── Cache de embeddings ───────────────────────────────────────────────────────
 @st.cache_resource(show_spinner="Carregando embeddings do Silver...")
-def load_docs():
+def load_docs(embedding_model: str):
     from rag_query import _load_embeddings_local
     return _load_embeddings_local()
 
@@ -88,7 +88,7 @@ if question:
             with st.spinner("Buscando contexto relevante..."):
                 from rag_query import retrieve, generate
                 os.environ["RAG_TOP_K"] = str(top_k)
-                docs_data = load_docs()
+                docs_data = load_docs(os.getenv("EMBEDDING_MODEL", ""))
                 chunks = retrieve(question, docs_data)
 
             if show_chunks and chunks:
