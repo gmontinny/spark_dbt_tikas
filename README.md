@@ -442,6 +442,12 @@ dbt test --profiles-dir .
 
 ## Solução de Problemas
 
+**Erro `SparkNoSuchElementException: SQL_CONF_NOT_FOUND` no Bronze/Silver/Gold**
+Incompatibilidade de versão entre o cliente PySpark (container `dev`) e o servidor Spark Connect. O projeto fixa `pyspark==4.0.1` no `pyproject.toml` para garantir compatibilidade. Se ocorrer após uma limpeza do Docker, rebuilde o container:
+```bash
+docker compose up -d --build dev
+```
+
 **Containers não sobem / ficam em `unhealthy`**
 ```bash
 make logs

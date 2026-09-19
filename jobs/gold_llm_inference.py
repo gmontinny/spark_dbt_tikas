@@ -33,12 +33,13 @@ STARROCKS_DB = os.getenv("STARROCKS_DB", "gold")
 TOPICS = ["economia", "imóveis", "inflação", "mercado financeiro", "política", "tecnologia"]
 
 
-def _get_conn(database: str = ""):
+def _get_conn(database=""):
     import mysql.connector
     kwargs = dict(
         host=STARROCKS_HOST, port=int(STARROCKS_PORT),
         user=STARROCKS_USER,
         password=os.getenv("STARROCKS_PASSWORD", ""),
+        autocommit=False,
     )
     if database:
         kwargs["database"] = database
@@ -51,38 +52,39 @@ def _ensure_starrocks_table() -> None:
     Garante upsert real: INSERT com chave duplicada atualiza o registro
     existente em vez de inserir novo — idempotência garantida.
     """
-    with _get_conn() as conn:
-        cur = conn.cursor()
-        try:
-            cur.execute(f"CREATE DATABASE IF NOT EXISTS {STARROCKS_DB}")
-            cur.execute(f"USE {STARROCKS_DB}")
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS documents_enriched (
-                    file_name       VARCHAR(512)  NOT NULL,
-                    content_type    VARCHAR(128),
-                    title           VARCHAR(512),
-                    author          VARCHAR(256),
-                    language        VARCHAR(32),
-                    num_pages       VARCHAR(16),
-                    text_length     INT,
-                    topic           VARCHAR(128),
-                    summary         STRING,
-                    ingested_at     DATETIME,
-                    processed_at    DATETIME,
-                    enriched_at     DATETIME
-                )
-                ENGINE = OLAP
-                PRIMARY KEY(file_name)
-                DISTRIBUTED BY HASH(file_name) BUCKETS 4
-                PROPERTIES ("replication_num" = "1")
-            """)
-            conn.commit()
-        finally:
-            cur.close()
+    conn = _get_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute(f"CREATE DATABASE IF NOT EXISTS {STARROCKS_DB}")
+        cur.execute(f"USE {STARROCKS_DB}")
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS documents_enriched (
+                file_name       VARCHAR(512)  NOT NULL,
+                content_type    VARCHAR(128),
+                title           VARCHAR(512),
+                author          VARCHAR(256),
+                language        VARCHAR(32),
+                num_pages       VARCHAR(16),
+                text_length     INT,
+                topic           VARCHAR(128),
+                summary         STRING,
+                ingested_at     DATETIME,
+                processed_at    DATETIME,
+                enriched_at     DATETIME
+            )
+            ENGINE = OLAP
+            PRIMARY KEY(file_name)
+            DISTRIBUTED BY HASH(file_name) BUCKETS 4
+            PROPERTIES ("replication_num" = "1")
+        """)
+        conn.commit()
+    finally:
+        cur.close()
+        conn.close()
     log.info("✅ StarRocks: tabela gold.documents_enriched pronta (PRIMARY KEY)")
 
 
-def _to_str(v) -> str | None:
+def _to_str(v):
     """Converte pandas.Timestamp e outros tipos para str compatível com MySQL."""
     if v is None:
         return None
@@ -92,7 +94,7 @@ def _to_str(v) -> str | None:
     return str(v) if not isinstance(v, str) else v
 
 
-def _upsert_batch(rows: list[tuple]) -> None:
+def _upsert_batch(rows):
     """Upsert via INSERT ... ON DUPLICATE KEY UPDATE — idempotente."""
     if not rows:
         return
@@ -102,15 +104,16 @@ def _upsert_batch(rows: list[tuple]) -> None:
              text_length, topic, summary, ingested_at, processed_at, enriched_at)
         VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
     """
-    with _get_conn(STARROCKS_DB) as conn:
-        cur = conn.cursor()
-        try:
-            cur.execute(f"USE {STARROCKS_DB}")
-            for row in rows:
-                cur.execute(sql, row)
-            conn.commit()
-        finally:
-            cur.close()
+    conn = _get_conn(STARROCKS_DB)
+    cur = conn.cursor()
+    try:
+        cur.execute(f"USE {STARROCKS_DB}")
+        for row in rows:
+            cur.execute(sql, row)
+        conn.commit()
+    finally:
+        cur.close()
+        conn.close()
 
 
 def _build_pipelines():

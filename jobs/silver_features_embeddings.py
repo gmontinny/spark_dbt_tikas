@@ -2,8 +2,8 @@
 Silver Layer — Feature Engineering e Embeddings
 ================================================
 Lê a camada Bronze, realiza limpeza/normalização de texto,
-gera embeddings semânticos com SentenceTransformers
-e persiste na camada Silver.
+gera TF-IDF via Spark MLlib e embeddings semânticos no driver
+(torch disponível apenas no container dev, não no worker).
 
 Execução:
     python jobs/silver_features_embeddings.py
@@ -13,6 +13,8 @@ import logging
 import os
 import re
 
+import torch
+from sentence_transformers import SentenceTransformer
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import col, current_timestamp, length, lower, trim, udf
 from pyspark.sql.types import ArrayType, FloatType, StringType
@@ -37,24 +39,16 @@ def _clean_text(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
-def _embed(text: str) -> list[float]:
-    import torch
-    from functools import lru_cache
-    from sentence_transformers import SentenceTransformer
-
-    @lru_cache(maxsize=1)
-    def _get_model(name: str):
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        return SentenceTransformer(name, device=device)
-
-    return _get_model(EMBEDDING_MODEL).encode(text[:2048], normalize_embeddings=True).tolist()
-
-
 def run() -> None:
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    log.info("🖥️  Dispositivo de inferência: %s", device)
+
+    log.info("Carregando modelo de embeddings: %s", EMBEDDING_MODEL)
+    embed_model = SentenceTransformer(EMBEDDING_MODEL, device=device)
+
     spark = SparkSession.builder.remote(SPARK_URL).getOrCreate()
 
     clean_udf = udf(_clean_text, StringType())
-    embed_udf = udf(_embed, ArrayType(FloatType()))
 
     spark.sql(f"CREATE DATABASE IF NOT EXISTS {DATABASE}")
 
@@ -67,7 +61,7 @@ def run() -> None:
         .filter(col("text_length") > 50)
     )
 
-    # TF-IDF via MLlib
+    # TF-IDF via MLlib — roda nos workers do Spark (sem torch)
     from pyspark.ml.feature import HashingTF, IDF, Tokenizer
 
     tokenizer  = Tokenizer(inputCol="text_clean", outputCol="words")
@@ -79,11 +73,25 @@ def run() -> None:
     idf_model = idf.fit(df_tf)
     df_tfidf  = idf_model.transform(df_tf).drop("words", "raw_features")
 
-    df_embedded = df_tfidf.withColumn("embedding", embed_udf(col("text_clean")))
+    # Coleta no driver para gerar embeddings (torch só existe no dev)
+    # tfidf_features é SparseVector — não serializável pelo PyArrow, descartado aqui
+    log.info("Coletando textos para gerar embeddings no driver...")
+    pdf = df_tfidf.drop("text_content", "tfidf_features").toPandas()
+
+    texts = pdf["text_clean"].fillna("").tolist()
+    log.info("Gerando embeddings para %d documentos...", len(texts))
+    embeddings = embed_model.encode(
+        [t[:2048] for t in texts],
+        normalize_embeddings=True,
+        show_progress_bar=True,
+    ).tolist()
+    pdf["embedding"] = embeddings
+    pdf["processed_at"] = __import__("datetime").datetime.utcnow()
+
+    df_result = spark.createDataFrame(pdf)
 
     (
-        df_embedded
-        .drop("text_content")
+        df_result
         .withColumn("processed_at", current_timestamp())
         .write.format("parquet")
         .option("path", SILVER_PATH)

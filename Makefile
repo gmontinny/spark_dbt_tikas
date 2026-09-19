@@ -1,7 +1,7 @@
 # The name of the Docker Compose file
 COMPOSE_FILE = docker-compose.yml
 
-.PHONY: help up down rebuild logs bronze silver gold pipeline-tika dbt-tika rag streaming finetune app connect-ingest submit-ingest
+.PHONY: help up down rebuild logs check bronze silver gold pipeline-tika dbt-tika rag streaming finetune app connect-ingest submit-ingest
 
 help: ## Lista todos os comandos disponíveis
 	@echo 'Usage: make [target]'
@@ -20,6 +20,9 @@ rebuild: ## Rebuild completo das imagens e reinicia
 
 logs: ## Logs de todos os containers
 	docker compose -f $(COMPOSE_FILE) logs -f
+
+check: ## Valida todos os pré-requisitos antes do pipeline
+	docker compose exec dev python /workspace/jobs/smoke_test.py
 
 # ── Pipeline Tika + IA (Arquitetura de Medalhas) ─────────────────────────────
 bronze: ## [Bronze] Extrai PDFs/DOCX com Apache Tika → MinIO

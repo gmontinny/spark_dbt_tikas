@@ -45,34 +45,37 @@ MESSAGE_SCHEMA = StructType([
 ])
 
 
-def _get_conn(database: str = ""):
+def _get_conn(database=""):
     import mysql.connector
     kwargs = dict(
         host=STARROCKS_HOST, port=int(STARROCKS_PORT),
         user=STARROCKS_USER,
         password=os.getenv("STARROCKS_PASSWORD", ""),
+        autocommit=False,
     )
     if database:
         kwargs["database"] = database
     return mysql.connector.connect(**kwargs)
 
 
+from functools import lru_cache
+
+
+@lru_cache(maxsize=1)
+def _get_classifier(name: str):
+    import torch
+    from transformers import pipeline
+    device = 0 if torch.cuda.is_available() else -1
+    return pipeline("zero-shot-classification", model=name, device=device)
+
+
 def _classify(text: str) -> str:
     if not text:
         return "desconhecido"
-    import torch
-    from functools import lru_cache
-    from transformers import pipeline
-
-    @lru_cache(maxsize=1)
-    def _get_classifier(name: str):
-        device = 0 if torch.cuda.is_available() else -1
-        return pipeline("zero-shot-classification", model=name, device=device)
-
     return _get_classifier(CLASSIFIER_MODEL)(text[:512], candidate_labels=TOPICS, truncation=True)["labels"][0]
 
 
-def _ts(v) -> str | None:
+def _ts(v):
     """Converte pandas.Timestamp para string compatível com MySQL."""
     if v is None:
         return None
@@ -93,40 +96,42 @@ def _write_to_starrocks(batch_df, batch_id: int) -> None:
         (r["file_name"], r["content_type"], r["title"], r["topic"], _ts(r["classified_at"]))
         for r in batch_df.toPandas().to_dict("records")
     ]
-    with _get_conn(STARROCKS_DB) as conn:
-        cur = conn.cursor()
-        try:
-            cur.execute(f"USE {STARROCKS_DB}")
-            for row in rows:
-                cur.execute(sql, row)
-            conn.commit()
-        finally:
-            cur.close()
+    conn = _get_conn(STARROCKS_DB)
+    cur = conn.cursor()
+    try:
+        cur.execute(f"USE {STARROCKS_DB}")
+        for row in rows:
+            cur.execute(sql, row)
+        conn.commit()
+    finally:
+        cur.close()
+        conn.close()
     log.info("Batch %d: %d registros → StarRocks (upsert)", batch_id, len(rows))
 
 
 def _ensure_stream_table() -> None:
-    with _get_conn() as conn:
-        cur = conn.cursor()
-        try:
-            cur.execute(f"CREATE DATABASE IF NOT EXISTS {STARROCKS_DB}")
-            cur.execute(f"USE {STARROCKS_DB}")
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS documents_stream (
-                    file_name    VARCHAR(512) NOT NULL,
-                    content_type VARCHAR(128),
-                    title        VARCHAR(512),
-                    topic        VARCHAR(128),
-                    classified_at DATETIME
-                )
-                ENGINE = OLAP
-                PRIMARY KEY(file_name)
-                DISTRIBUTED BY HASH(file_name) BUCKETS 4
-                PROPERTIES ("replication_num" = "1")
-            """)
-            conn.commit()
-        finally:
-            cur.close()
+    conn = _get_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute(f"CREATE DATABASE IF NOT EXISTS {STARROCKS_DB}")
+        cur.execute(f"USE {STARROCKS_DB}")
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS documents_stream (
+                file_name    VARCHAR(512) NOT NULL,
+                content_type VARCHAR(128),
+                title        VARCHAR(512),
+                topic        VARCHAR(128),
+                classified_at DATETIME
+            )
+            ENGINE = OLAP
+            PRIMARY KEY(file_name)
+            DISTRIBUTED BY HASH(file_name) BUCKETS 4
+            PROPERTIES ("replication_num" = "1")
+        """)
+        conn.commit()
+    finally:
+        cur.close()
+        conn.close()
     log.info("✅ StarRocks: tabela gold.documents_stream pronta")
 
 

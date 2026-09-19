@@ -26,7 +26,7 @@ log = logging.getLogger(__name__)
 
 SPARK_URL = os.getenv("SPARK_CONNECT_URL", "sc://localhost:15002")
 SILVER_PATH = os.getenv("SILVER_PATH", "s3a://warehouse/silver/documents_features")
-EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
+EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "PORTULAN/serafim-100m-portuguese-pt-sentence-encoder")
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "ollama").lower()
 LLM_MODEL = os.getenv("LLM_MODEL", "llama3.1")
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://host.docker.internal:11434")
