@@ -14,7 +14,7 @@ clean-targets: ["target", "dbt_packages"]
 models:
   spark_dbt_tikas:
     staging:
-      +schema: silver
+      +schema: gold
       +materialized: view
     gold:
       +schema: gold

@@ -89,7 +89,7 @@ def generate(question: str, chunks: list[dict]) -> str:
         device_map="auto",
     )
     inputs = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=3072).to(model.device)
-    with torch.no_grad():
+    with torch.inference_mode():
         output = model.generate(**inputs, max_new_tokens=512, temperature=0.3, do_sample=True)
     response = tokenizer.decode(output[0][inputs["input_ids"].shape[1]:], skip_special_tokens=True)
     return response.strip()

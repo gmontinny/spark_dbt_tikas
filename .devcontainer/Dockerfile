@@ -22,30 +22,31 @@ COPY pyproject.toml ./
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --system \
-      pyspark>=4.0.0 \
-      minio>=7.1.0 \
-      kafka-python>=2.0.2 \
-      psycopg2-binary>=2.9.0 \
-      requests>=2.28.0 \
-      pandas>=1.5.0 \
-      pyarrow>=10.0.0 \
-      streamlit>=1.49.1 \
-      confluent-kafka>=2.11.1 \
-      python-dotenv>=1.1.1 \
-      grpcio>=1.74.0 \
-      grpcio-status>=1.74.0 \
-      zstandard>=0.25.0 \
-      trino>=0.328.0 \
-      dbt-trino>=1.8.0 \
-      dbt-starrocks>=1.3.0 \
-      tika>=2.6.0 \
-      sentence-transformers>=2.2.0 \
-      torch>=2.0.0 \
-      transformers>=4.30.0 \
-      langchain>=0.1.0 \
-      langchain-community>=0.0.20 \
-      numpy>=1.21.0 \
-      scikit-learn>=1.0.0
+      pyspark==4.0.1 \
+      minio==7.2.15 \
+      kafka-python==2.0.2 \
+      psycopg2-binary==2.9.10 \
+      requests==2.32.3 \
+      pandas==2.2.3 \
+      pyarrow==18.1.0 \
+      streamlit==1.45.1 \
+      confluent-kafka==2.11.0 \
+      python-dotenv==1.1.0 \
+      grpcio==1.74.0 \
+      grpcio-status==1.74.0 \
+      zstandard==0.23.0 \
+      trino==0.328.0 \
+      dbt-trino==1.9.2 \
+      dbt-starrocks==1.3.0 \
+      tika==2.6.0 \
+      sentence-transformers==3.4.1 \
+      torch==2.5.1 \
+      transformers==4.51.3 \
+      langchain==0.3.25 \
+      langchain-community==0.3.24 \
+      numpy==1.26.4 \
+      scikit-learn==1.6.1 \
+      mysql-connector-python==9.3.0
 
 COPY . .
 

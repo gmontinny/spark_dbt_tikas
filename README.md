@@ -228,7 +228,7 @@ RAG_TOP_K=3
 | Port     | `8080`                                     |
 | User     | `admin` (qualquer string, sem autenticação)|
 | Password | *(vazio)*                                  |
-| Catalog  | `hive` ou `iceberg`                        |
+| Catalog  | `hive`                                     |
 
 ```sql
 -- Schemas disponíveis

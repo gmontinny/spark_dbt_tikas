@@ -60,7 +60,7 @@ pipeline: ingest dbt-run ## Full pipeline: ingest raw + dbt transform
 
 # ── Exemplos PySpark Connect vs spark-submit ────────────────────────────────
 connect-ingest: ## [Exemplo 1] Ingestão via PySpark Connect (cliente remoto gRPC)
-	docker compose exec spark-connect python /opt/spark/work-dir/jobs/pyspark_connect_ingest.py
+	docker compose exec spark-connect python /opt/spark/work-dir/jobs/debug/pyspark_connect_ingest.py
 
 submit-ingest: ## [Exemplo 2] Ingestão via spark-submit (driver local no container)
 	docker compose exec spark-connect \
@@ -68,7 +68,7 @@ submit-ingest: ## [Exemplo 2] Ingestão via spark-submit (driver local no contai
 		--master local[*] \
 		--packages org.apache.hadoop:hadoop-aws:3.3.6,com.amazonaws:aws-java-sdk-bundle:1.12.262 \
 		--conf spark.sql.shuffle.partitions=4 \
-		/opt/spark/work-dir/jobs/spark_submit_ingest.py
+		/opt/spark/work-dir/jobs/debug/spark_submit_ingest.py
 
 # ── Pipeline Tika + IA (Arquitetura de Medalhas) ─────────────────────────────
 bronze: ## [Bronze] Extrai PDFs/DOCX com Apache Tika → MinIO

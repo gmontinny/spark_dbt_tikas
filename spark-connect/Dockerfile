@@ -6,18 +6,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       python3 python3-pip openjdk-21-jre-headless curl && \
     pip3 install --no-cache-dir \
       pyspark==4.0.1 \
-      pandas>=2.0.0 \
-      pyarrow \
-      grpcio>=1.74.0 \
-      grpcio-status>=1.74.0 \
-      zstandard>=0.25.0 \
-      requests \
-      tika>=2.6.0 \
-      sentence-transformers>=2.2.0 \
-      torch>=2.0.0 \
-      transformers>=4.30.0 \
-      numpy \
-      mysql-connector-python && \
+      pandas==2.2.3 \
+      pyarrow==18.1.0 \
+      grpcio==1.74.0 \
+      grpcio-status==1.74.0 \
+      zstandard==0.23.0 \
+      requests==2.32.3 \
+      tika==2.6.0 \
+      sentence-transformers==3.4.1 \
+      torch==2.5.1 \
+      transformers==4.51.3 \
+      numpy==1.26.4 \
+      mysql-connector-python==9.3.0 && \
     ln -sf /usr/bin/python3 /usr/bin/python && \
     rm -rf /var/lib/apt/lists/*
 

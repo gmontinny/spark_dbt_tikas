@@ -32,9 +32,17 @@ def _train_fn(data: list[dict], epochs: int, base_model: str, output_path: str) 
     Função de treinamento executada em cada worker pelo TorchDistributor.
     Recebe os dados já coletados e treina localmente com PyTorch + HuggingFace.
     """
+    import random
     import torch
+    import numpy as np
     from torch.utils.data import DataLoader, Dataset
     from transformers import AutoModelForSequenceClassification, AutoTokenizer, AdamW
+
+    # Garante reprodutibilidade
+    SEED = 42
+    random.seed(SEED)
+    np.random.seed(SEED)
+    torch.manual_seed(SEED)
 
     class DocDataset(Dataset):
         def __init__(self, records, tokenizer):
@@ -74,11 +82,11 @@ def _train_fn(data: list[dict], epochs: int, base_model: str, output_path: str) 
         for batch_enc, labels in loader:
             batch_enc = {k: v.to(device) for k, v in batch_enc.items()}
             labels = labels.to(device)
+            optimizer.zero_grad()
             outputs = model(**batch_enc, labels=labels)
             loss = outputs.loss
             loss.backward()
             optimizer.step()
-            optimizer.zero_grad()
             total_loss += loss.item()
         log.info("Epoch %d/%d — loss: %.4f", epoch + 1, epochs, total_loss / len(loader))
 

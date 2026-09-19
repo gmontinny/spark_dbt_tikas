@@ -32,9 +32,7 @@ CHECKPOINT_PATH = "s3a://warehouse/checkpoints/streaming_inference"
 STARROCKS_HOST = os.getenv("STARROCKS_HOST", "starrocks-fe-0")
 STARROCKS_PORT = os.getenv("STARROCKS_FE_QUERY_PORT", "9030")
 STARROCKS_USER = os.getenv("STARROCKS_USER", "root")
-STARROCKS_PASSWORD = os.getenv("STARROCKS_PASSWORD", "")
 STARROCKS_DB = os.getenv("STARROCKS_DB", "gold")
-STARROCKS_JDBC = f"jdbc:mysql://{STARROCKS_HOST}:{STARROCKS_PORT}/{STARROCKS_DB}?useSSL=false"
 
 TOPICS = ["economia", "imóveis", "inflação", "mercado financeiro", "política", "tecnologia"]
 
@@ -51,9 +49,17 @@ def _classify(text: str) -> str:
     if not text:
         return "desconhecido"
     from transformers import pipeline
-    classifier = pipeline("zero-shot-classification", model=CLASSIFIER_MODEL)
-    result = classifier(text[:512], candidate_labels=TOPICS)
-    return result["labels"][0]
+    classifier = pipeline(
+        "zero-shot-classification", model=CLASSIFIER_MODEL,
+    )
+    return classifier(text[:512], candidate_labels=TOPICS, truncation=True)["labels"][0]
+
+
+def _ts(v) -> str | None:
+    """Converte pandas.Timestamp para string compatível com MySQL."""
+    if v is None:
+        return None
+    return v.strftime("%Y-%m-%d %H:%M:%S") if hasattr(v, "strftime") else str(v)
 
 
 def _write_to_starrocks(batch_df, batch_id: int) -> None:
@@ -61,56 +67,58 @@ def _write_to_starrocks(batch_df, batch_id: int) -> None:
     if batch_df.isEmpty():
         return
     import mysql.connector
-    conn = mysql.connector.connect(
-        host=STARROCKS_HOST, port=int(STARROCKS_PORT),
-        user=STARROCKS_USER, password=STARROCKS_PASSWORD,
-    )
-    cur = conn.cursor()
-    cur.execute(f"USE {STARROCKS_DB}")
     sql = """
         INSERT INTO documents_stream
             (file_name, content_type, title, topic, classified_at)
         VALUES (%s, %s, %s, %s, %s)
-        ON DUPLICATE KEY UPDATE
-            topic         = VALUES(topic),
-            classified_at = VALUES(classified_at)
     """
     rows = [
-        (r["file_name"], r["content_type"], r["title"], r["topic"], r["classified_at"])
+        (r["file_name"], r["content_type"], r["title"], r["topic"], _ts(r["classified_at"]))
         for r in batch_df.toPandas().to_dict("records")
     ]
-    cur.executemany(sql, rows)
-    conn.commit()
-    cur.close()
-    conn.close()
+    with mysql.connector.connect(
+        host=STARROCKS_HOST, port=int(STARROCKS_PORT),
+        user=STARROCKS_USER,
+        password=os.getenv("STARROCKS_PASSWORD", ""),
+    ) as conn:
+        cur = conn.cursor()
+        try:
+            cur.execute(f"USE {STARROCKS_DB}")
+            for row in rows:
+                cur.execute(sql, row)
+            conn.commit()
+        finally:
+            cur.close()
     log.info("Batch %d: %d registros → StarRocks (upsert)", batch_id, len(rows))
 
 
 def _ensure_stream_table() -> None:
     import mysql.connector
-    conn = mysql.connector.connect(
+    with mysql.connector.connect(
         host=STARROCKS_HOST, port=int(STARROCKS_PORT),
-        user=STARROCKS_USER, password=STARROCKS_PASSWORD,
-    )
-    cur = conn.cursor()
-    cur.execute(f"CREATE DATABASE IF NOT EXISTS {STARROCKS_DB}")
-    cur.execute(f"USE {STARROCKS_DB}")
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS documents_stream (
-            file_name    VARCHAR(512) NOT NULL,
-            content_type VARCHAR(128),
-            title        VARCHAR(512),
-            topic        VARCHAR(128),
-            classified_at DATETIME
-        )
-        ENGINE = OLAP
-        PRIMARY KEY(file_name)
-        DISTRIBUTED BY HASH(file_name) BUCKETS 4
-        PROPERTIES ("replication_num" = "1")
-    """)
-    conn.commit()
-    cur.close()
-    conn.close()
+        user=STARROCKS_USER,
+        password=os.getenv("STARROCKS_PASSWORD", ""),
+    ) as conn:
+        cur = conn.cursor()
+        try:
+            cur.execute(f"CREATE DATABASE IF NOT EXISTS {STARROCKS_DB}")
+            cur.execute(f"USE {STARROCKS_DB}")
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS documents_stream (
+                    file_name    VARCHAR(512) NOT NULL,
+                    content_type VARCHAR(128),
+                    title        VARCHAR(512),
+                    topic        VARCHAR(128),
+                    classified_at DATETIME
+                )
+                ENGINE = OLAP
+                PRIMARY KEY(file_name)
+                DISTRIBUTED BY HASH(file_name) BUCKETS 4
+                PROPERTIES ("replication_num" = "1")
+            """)
+            conn.commit()
+        finally:
+            cur.close()
     log.info("✅ StarRocks: tabela gold.documents_stream pronta")
 
 
