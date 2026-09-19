@@ -1,7 +1,16 @@
 # Spark + Tika + dbt + StarRocks + IA Generativa
 
-Pipeline de ingestão, enriquecimento e consulta inteligente de documentos
-com arquitetura de medalhas (Bronze → Silver → Gold) e IA Generativa (RAG + LLMs).
+> Pipeline completo de ingestão, enriquecimento e consulta inteligente de documentos com arquitetura de medalhas (Bronze → Silver → Gold), IA Generativa (RAG) e suporte a múltiplos provedores de LLM.
+
+---
+
+## Visão Geral
+
+Este projeto demonstra uma arquitetura moderna de dados aplicada a documentos não estruturados (PDF, DOCX, TXT). O pipeline extrai texto e metadados com **Apache Tika**, processa e gera embeddings semânticos com **Apache Spark 4.x**, aplica modelos de linguagem para sumarização e classificação, e disponibiliza uma interface de perguntas e respostas via **RAG (Retrieval-Augmented Generation)**.
+
+O usuário pode fazer perguntas em linguagem natural sobre os documentos e receber respostas fundamentadas no conteúdo real — usando **OpenAI**, **Google Gemini** ou **Ollama** (local, sem custo) como LLM.
+
+---
 
 ## Arquitetura
 
@@ -17,12 +26,8 @@ com arquitetura de medalhas (Bronze → Silver → Gold) e IA Generativa (RAG + 
 │                                                                         │
 │  Apache Tika (REST :9998)                                               │
 │  ├── Extração de texto completo  (endpoint /tika)                       │
-│  ├── Extração de metadados       (endpoint /meta)                       │
-│  │   autor, título, páginas, idioma, data de criação                    │
-│  └── Suporte a PDF, DOCX, PPTX, XLSX, HTML, TXT                        │
-│                                                                         │
-│  Nota: tika-python 3.x requer duas chamadas separadas:                  │
-│    service="text" → conteúdo  |  service="meta" → metadados             │
+│  └── Extração de metadados       (endpoint /meta)                       │
+│      autor, título, páginas, idioma, data de criação                    │
 │                                                                         │
 │  Spark 4.x Connect → Parquet → MinIO (s3a://warehouse/bronze)          │
 │  Catálogo: hive.bronze.documents  (consultável via Trino)               │
@@ -32,12 +37,11 @@ com arquitetura de medalhas (Bronze → Silver → Gold) e IA Generativa (RAG + 
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                         CAMADA SILVER                                   │
 │                                                                         │
-│  Spark 4.x — Feature Engineering e Deep Learning                       │
+│  Spark 4.x — Feature Engineering                                       │
 │  ├── Limpeza e normalização de texto (UDF distribuída)                  │
 │  ├── TF-IDF via Spark MLlib (HashingTF + IDF)                          │
 │  └── Embeddings semânticos distribuídos                                 │
 │      └── SentenceTransformers (paraphrase-multilingual-MiniLM-L12-v2)  │
-│          executado como UDF em cada executor Spark                      │
 │                                                                         │
 │  Spark 4.x Connect → Parquet → MinIO (s3a://warehouse/silver)          │
 │  Catálogo: hive.silver.documents_features  (consultável via Trino)     │
@@ -47,21 +51,16 @@ com arquitetura de medalhas (Bronze → Silver → Gold) e IA Generativa (RAG + 
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                          CAMADA GOLD                                    │
 │                                                                         │
-│  Spark 4.x — Inferência com LLMs (executada no driver após collect)    │
+│  Spark 4.x — Inferência com LLMs                                       │
 │  ├── Sumarização (facebook/bart-large-cnn)                              │
-│  │   └── BartForConditionalGeneration — geração direta sem pipeline()  │
 │  └── Classificação zero-shot (cross-encoder/nli-MiniLM2-L6-H768)       │
-│      └── Classifica tópico sem treinamento supervisionado               │
 │                                                                         │
 │  Escrita via mysql-connector-python → StarRocks OLAP (:9030)           │
 │  └── gold.documents_enriched  (PRIMARY KEY — upsert nativo)            │
 │                                                                         │
-│  Nota: StarRocks PRIMARY KEY faz upsert automático com INSERT simples.  │
-│  ON DUPLICATE KEY UPDATE não é suportado pelo StarRocks.                │
-│                                                                         │
-│  dbt (adapter: starrocks 1.12.2) — Modelagem Analítica                 │
+│  dbt (adapter: starrocks) — Modelagem Analítica                        │
 │  ├── stg_documents_enriched      (staging / view)                      │
-│  ├── mart_documents_by_topic     (tabela OLAP por tópico)              │
+│  ├── mart_documents_by_topic     (métricas por tópico)                 │
 │  └── mart_document_summaries     (tabela para RAG/busca semântica)     │
 └───────────────────────────────┬─────────────────────────────────────────┘
                                 │
@@ -79,199 +78,235 @@ com arquitetura de medalhas (Bronze → Silver → Gold) e IA Generativa (RAG + 
 │  4. TOP-K chunks          │  └────────────────────────────────────────┘
 │     mais relevantes       │
 │  5. Prompt + contexto     │  ┌────────────────────────────────────────┐
-│     → OPT-125M           │  │         FINE-TUNING                    │
-│  6. Resposta gerada       │  │                                        │
-│     fundamentada nos docs │  │  TorchDistributor (Spark 4.x)         │
-│                           │  │  ├── Barrier execution distribuído     │
-│  Interface: Streamlit     │  │  ├── DistilBERT multilingual           │
-│  http://localhost:8501    │  │  └── Modelo salvo em MinIO             │
-└───────────────────────────┘  │      s3a://warehouse/models/           │
-                               └────────────────────────────────────────┘
-                                        │
-                                        ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│                          VISUALIZAÇÃO                                   │
-│                                                                         │
-│  Superset (:8088)   — Dashboards sobre marts Gold (StarRocks)          │
-│  Trino UI (:8080)   — Exploração ad-hoc Bronze e Silver (catálogo hive)│
-│  Streamlit (:8501)  — Interface RAG (perguntas sobre documentos)       │
-│  MinIO UI (:9001)   — Exploração dos arquivos Parquet                  │
-└─────────────────────────────────────────────────────────────────────────┘
+│     → LLM (OpenAI /       │  │         FINE-TUNING                    │
+│       Gemini / Ollama)    │  │                                        │
+│  6. Resposta gerada       │  │  TorchDistributor (Spark 4.x)         │
+│     fundamentada nos docs │  │  ├── Barrier execution distribuído     │
+│                           │  │  ├── DistilBERT multilingual           │
+│  Interface: Streamlit     │  │  └── Modelo salvo em MinIO             │
+│  http://localhost:8501    │  │      s3a://warehouse/models/           │
+└───────────────────────────┘  └────────────────────────────────────────┘
 ```
 
-## Serviços
+---
 
-| Serviço          | Porta   | Descrição                                            |
-|------------------|---------|------------------------------------------------------|
-| tika-server      | 9998    | Apache Tika REST — extração de texto e metadados     |
-| spark-connect    | 15002   | Spark 4.x Connect (gRPC) — processamento distribuído |
-| starrocks-fe-0   | 9030    | StarRocks FE — query engine OLAP (camada Gold)       |
-| starrocks-be-0   | 8040    | StarRocks BE — storage e execução                    |
-| trino            | 8080    | Query engine ad-hoc (camadas Bronze e Silver)        |
-| hive-metastore   | 9083    | Catálogo de tabelas Bronze e Silver                  |
-| minio            | 9000/01 | Object store — Bronze, Silver e modelos              |
-| kafka            | 9092    | Broker para inferência em streaming                  |
-| superset         | 8088    | Dashboards analíticos                                |
-| postgres         | 5432    | Backend do Hive Metastore                            |
+## Stack de Tecnologias
 
-## Execução
+| Categoria | Tecnologia |
+|---|---|
+| Processamento distribuído | Apache Spark 4.x (Connect mode) |
+| Extração de documentos | Apache Tika 2.x (REST) |
+| Object store | MinIO (S3-compatible) |
+| Catálogo de metadados | Hive Metastore + PostgreSQL |
+| Query engine ad-hoc | Trino |
+| OLAP / Data Warehouse | StarRocks |
+| Modelagem analítica | dbt (adapter starrocks) |
+| Streaming | Apache Kafka + Spark Structured Streaming |
+| Embeddings | SentenceTransformers (HuggingFace) |
+| LLM — geração de texto | OpenAI GPT-4o-mini / Google Gemini / Ollama |
+| Interface RAG | Streamlit |
+| Dashboards | Apache Superset |
+| Linguagem | Python 3.12 |
+| Gerenciador de pacotes | uv |
+
+---
+
+## Pré-requisitos
+
+### Obrigatórios
+- [Docker](https://docs.docker.com/get-docker/) 24+
+- [Docker Compose](https://docs.docker.com/compose/install/) v2+
+- 16 GB de RAM disponível (recomendado: 32 GB)
+- 20 GB de espaço em disco
+
+### Para o LLM (escolha uma opção)
+
+| Opção | Custo | Requisito |
+|---|---|---|
+| **Ollama** (padrão) | Gratuito | [Instalar Ollama](https://ollama.com) + `ollama pull llama3.1` |
+| **OpenAI** | Pago por uso | [API Key](https://platform.openai.com/api-keys) |
+| **Google Gemini** | Gratuito com limites | [API Key](https://aistudio.google.com/app/apikey) |
+
+---
+
+## Início Rápido
+
+### 1. Clone o repositório
 
 ```bash
-# 1. Subir todos os serviços
-make up
+git clone https://github.com/seu-usuario/spark-tika-dbt-starrocks.git
+cd spark-tika-dbt-starrocks
+```
 
-# 2. Pipeline completo (Bronze → Silver → Gold)
+### 2. Configure o ambiente
+
+```bash
+cp .env.example .env
+```
+
+Abra o `.env` e configure o provider de LLM desejado:
+
+```env
+# Escolha: openai | gemini | ollama
+LLM_PROVIDER=ollama
+
+# Se usar Ollama (instale em https://ollama.com e execute: ollama pull llama3.1)
+LLM_MODEL=llama3.1
+
+# Se usar OpenAI
+# LLM_PROVIDER=openai
+# OPENAI_API_KEY=sk-...
+
+# Se usar Gemini
+# LLM_PROVIDER=gemini
+# GEMINI_API_KEY=AIza...
+```
+
+### 3. Suba os serviços
+
+```bash
+make up
+```
+
+> Na primeira execução o Docker irá baixar e construir as imagens (~5–10 min dependendo da conexão).
+
+### 4. Execute o pipeline completo
+
+```bash
+# Bronze → Silver → Gold (extração, embeddings, inferência LLM)
 make pipeline-tika
 
-# 3. Transformações dbt (Gold → marts analíticos)
+# Transformações dbt (marts analíticos no StarRocks)
 make dbt-tika
-
-# 4. Interface RAG (perguntas sobre os documentos)
-make app          # abre em http://localhost:8501
-
-# Ou via CLI:
-docker compose exec dev python /workspace/jobs/rag_query.py --question "Qual foi a variação do IPCA?"
-
-# Inferência contínua (Kafka → StarRocks)
-make streaming
-
-# Fine-tuning distribuído (TorchDistributor)
-make finetune
-
-# Etapas individuais do pipeline:
-make bronze   # Extração Tika (texto + metadados)
-make silver   # Features + Embeddings
-make gold     # Inferência LLM → StarRocks
 ```
 
-## Jobs
-
-| Arquivo                              | Camada    | Descrição                                              |
-|--------------------------------------|-----------|--------------------------------------------------------|
-| `jobs/bronze_tika_ingest.py`         | Bronze    | Extrai texto (service=text) e metadados (service=meta) via Tika REST |
-| `jobs/silver_features_embeddings.py` | Silver    | TF-IDF (MLlib) + embeddings semânticos distribuídos    |
-| `jobs/gold_llm_inference.py`         | Gold      | Sumarização (BART) + classificação zero-shot → StarRocks |
-| `jobs/rag_query.py`                  | IA Gen.   | RAG: cosine similarity + OPT-125M gera resposta        |
-| `jobs/streaming_inference.py`        | Streaming | Inferência contínua Kafka → StarRocks (Structured Streaming) |
-| `jobs/finetune_distributed.py`       | IA Gen.   | Fine-tuning distribuído com TorchDistributor (Spark 4.x) |
-| `jobs/pipeline_run.py`               | All       | Orquestrador Bronze → Silver → Gold                    |
-
-> Scripts de diagnóstico e protótipos estão em `jobs/debug/` e não fazem parte do pipeline de produção.
-
-## IA Generativa — Detalhes
-
-### RAG (Retrieval-Augmented Generation)
-O `rag_query.py` implementa o ciclo completo:
-
-```
-Pergunta → Embedding (SentenceTransformers)
-         → Cosine Similarity nos embeddings do Silver
-         → TOP-K chunks mais relevantes
-         → Prompt com contexto
-         → OPT-125M gera resposta fundamentada nos documentos
-```
-
-Configurável via `.env`:
-```env
-LLM_MODEL=facebook/opt-125m
-RAG_TOP_K=3
-```
-
-### Streaming (Inferência Contínua)
-O `streaming_inference.py` usa Structured Streaming do Spark 4.x:
-- Consome mensagens JSON do tópico Kafka `tika.documents`
-- Aplica classificação zero-shot a cada micro-batch (30s)
-- Grava resultados em `gold.documents_stream` no StarRocks
-
-### Fine-Tuning Distribuído
-O `finetune_distributed.py` usa o **TorchDistributor** do Spark 4.x:
-- Barrier execution garante sincronização entre workers
-- Ajusta DistilBERT multilingual nos documentos da camada Silver
-- Seeds fixos (`random`, `numpy`, `torch`) garantem reprodutibilidade
-- Modelo salvo em `s3a://warehouse/models/topic_classifier`
-
-## dbt (camada Gold — StarRocks)
+### 5. Abra a interface RAG
 
 ```bash
-cd dbt_project
-dbt run --profiles-dir .    # cria marts analíticos no StarRocks
-dbt test --profiles-dir .   # valida qualidade dos dados (7 testes)
+make app
 ```
 
-### Modelos dbt
+Acesse **http://localhost:8501** e faça perguntas sobre os documentos.
 
-| Modelo                      | Tipo   | Descrição                                        |
-|-----------------------------|--------|--------------------------------------------------|
-| `stg_documents_enriched`    | view   | Staging normalizado dos documentos enriquecidos  |
-| `mart_documents_by_topic`   | table  | Métricas analíticas por tópico (para Superset)   |
-| `mart_document_summaries`   | table  | Sumarizações prontas para RAG e busca semântica  |
+---
 
-### Notas de compatibilidade dbt-starrocks
+## Adicionando seus próprios documentos
 
-- `+distributed_by` deve ser uma **lista YAML** (`- file_name`), não string — o adapter monta `HASH()` automaticamente
-- `+schema` não deve ser definido nos modelos — o database `gold` do `profiles.yml` já determina o schema destino
-- Modelos com `ref()` dentro de CTEs precisam do hint `-- depends_on: {{ ref('...') }}` no topo do arquivo
-- StarRocks `PRIMARY KEY` faz upsert nativo com `INSERT` simples — `ON DUPLICATE KEY UPDATE` não é suportado
+Coloque arquivos PDF, DOCX ou TXT na pasta `datas/` e reexecute o pipeline:
 
-## Variáveis de Ambiente (.env)
-
-```env
-# Tika
-TIKA_SERVER_JAR=http://tika-server:9998
-DATAS_DIR=/opt/spark/work-dir/datas
-
-# StarRocks
-STARROCKS_HOST=starrocks-fe-0
-STARROCKS_FE_QUERY_PORT=9030
-STARROCKS_USER=root
-STARROCKS_PASSWORD=
-STARROCKS_DB=gold
-
-# Modelos de IA (HuggingFace)
-EMBEDDING_MODEL=sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
-SUMMARIZER_MODEL=facebook/bart-large-cnn
-CLASSIFIER_MODEL=cross-encoder/nli-MiniLM2-L6-H768
-LLM_MODEL=facebook/opt-125m
+```bash
+make pipeline-tika
+make dbt-tika
 ```
 
-## Acesso via DataGrip (ou qualquer SQL client)
+O pipeline detecta automaticamente os novos arquivos.
+
+---
+
+## Comandos disponíveis
+
+```bash
+make help          # Lista todos os comandos disponíveis
+make up            # Sobe todos os serviços
+make down          # Para todos os serviços
+make pipeline-tika # Pipeline completo: Bronze → Silver → Gold
+make bronze        # Apenas extração Tika
+make silver        # Apenas features + embeddings
+make gold          # Apenas inferência LLM → StarRocks
+make dbt-tika      # Transformações dbt + testes de qualidade
+make app           # Interface RAG (Streamlit)
+make streaming     # Inferência contínua via Kafka
+make finetune      # Fine-tuning distribuído (TorchDistributor)
+make rag           # Pergunta via CLI (sem interface web)
+make logs          # Logs de todos os containers
+make rebuild       # Rebuild completo das imagens
+```
+
+---
+
+## Serviços e Portas
+
+| Serviço | URL | Credenciais |
+|---|---|---|
+| Streamlit (RAG) | http://localhost:8501 | — |
+| Trino UI | http://localhost:8080 | — |
+| MinIO Console | http://localhost:9001 | `minioadmin` / `minioadmin` |
+| Superset | http://localhost:8088 | `admin` / `admin` |
+| Spark UI | http://localhost:4040 | — |
+| StarRocks FE | `localhost:9030` | `root` / *(vazio)* |
+| Apache Tika | http://localhost:9998 | — |
+
+---
+
+## Estrutura do Projeto
+
+```
+.
+├── datas/                          # Documentos de entrada (PDF, DOCX, TXT)
+├── jobs/
+│   ├── bronze_tika_ingest.py       # Extração Tika → MinIO (Bronze)
+│   ├── silver_features_embeddings.py # TF-IDF + embeddings (Silver)
+│   ├── gold_llm_inference.py       # Sumarização + classificação (Gold)
+│   ├── rag_query.py                # RAG: busca semântica + geração LLM
+│   ├── streaming_inference.py      # Inferência contínua Kafka → StarRocks
+│   ├── finetune_distributed.py     # Fine-tuning com TorchDistributor
+│   ├── pipeline_run.py             # Orquestrador Bronze → Silver → Gold
+│   └── debug/                      # Scripts de diagnóstico (não produção)
+├── app/
+│   └── streamlit_rag.py            # Interface web RAG
+├── dbt_project/
+│   ├── models/
+│   │   ├── staging/                # stg_documents_enriched (view)
+│   │   └── gold/                   # mart_documents_by_topic, mart_document_summaries
+│   ├── dbt_project.yml
+│   └── profiles.yml
+├── .devcontainer/
+│   └── Dockerfile                  # Imagem do container dev (Python 3.12 + uv)
+├── spark-connect/                  # Configuração do Spark Connect
+├── hive-metastore/                 # Configuração do Hive Metastore
+├── trino/                          # Catálogo Trino (hive)
+├── docker-compose.yml
+├── Makefile
+├── pyproject.toml                  # Dependências Python (gerenciado por uv)
+├── .env.example                    # Template de configuração
+└── README.md
+```
+
+---
+
+## Consultando os dados
 
 ### Trino — camadas Bronze e Silver
 
-> Trino expõe apenas o catálogo `hive`. As tabelas Bronze e Silver são Parquet/Hive — não Iceberg.
+Conecte com qualquer cliente SQL (DBeaver, DataGrip, etc.):
 
-| Campo    | Valor                                       |
-|----------|---------------------------------------------|
-| Driver   | Trino                                       |
-| Host     | `localhost`                                 |
-| Port     | `8080`                                      |
-| User     | `admin` (qualquer string, sem autenticação) |
-| Password | *(vazio)*                                   |
-| Catalog  | `hive`                                      |
+| Campo | Valor |
+|---|---|
+| Driver | Trino |
+| Host | `localhost` |
+| Port | `8080` |
+| User | `admin` |
+| Catalog | `hive` |
 
 ```sql
--- Schemas disponíveis
-SHOW SCHEMAS FROM hive;
-
--- Bronze: documentos extraídos pelo Tika (texto + metadados)
+-- Documentos extraídos pelo Tika
 SELECT file_name, content_type, author, language, num_pages, ingested_at
 FROM hive.bronze.documents;
 
--- Silver: features e embeddings gerados pelo Spark
+-- Features e embeddings gerados pelo Spark
 SELECT file_name, text_length, processed_at
 FROM hive.silver.documents_features;
 ```
 
 ### StarRocks — camada Gold
 
-| Campo    | Valor                               |
-|----------|-------------------------------------|
-| Driver   | MySQL (StarRocks é MySQL-compatible) |
-| Host     | `localhost`                         |
-| Port     | `9030`                              |
-| User     | `root`                              |
-| Password | *(vazio)*                           |
-| Database | `gold`                              |
+| Campo | Valor |
+|---|---|
+| Driver | MySQL |
+| Host | `localhost` |
+| Port | `9030` |
+| User | `root` |
+| Database | `gold` |
 
 ```sql
 -- Documentos enriquecidos pelo LLM
@@ -284,10 +319,6 @@ SELECT topic, topic_total_docs, topic_avg_text_length
 FROM gold.mart_documents_by_topic
 ORDER BY topic_total_docs DESC;
 
--- Sumarizações para RAG
-SELECT document_title, topic, summary
-FROM gold.mart_document_summaries;
-
 -- Inferência em streaming (tempo real)
 SELECT file_name, topic, classified_at
 FROM gold.documents_stream
@@ -295,12 +326,121 @@ ORDER BY classified_at DESC
 LIMIT 20;
 ```
 
-### Outros serviços
+---
 
-| Serviço    | URL                   | Credenciais                 |
-|------------|-----------------------|-----------------------------|
-| MinIO      | http://localhost:9001 | `minioadmin` / `minioadmin` |
-| Superset   | http://localhost:8088 | `admin` / `admin`           |
-| Streamlit  | http://localhost:8501 | sem autenticação            |
-| Spark UI   | http://localhost:4040 | sem autenticação            |
-| Trino UI   | http://localhost:8080 | sem autenticação            |
+## Configuração do LLM
+
+O provider é configurado pela variável `LLM_PROVIDER` no `.env`. Não é necessário recriar o container — a alteração é lida a cada execução.
+
+### Ollama (gratuito, local)
+
+```bash
+# 1. Instale o Ollama: https://ollama.com
+# 2. Baixe o modelo
+ollama pull llama3.1
+
+# 3. Configure o .env
+LLM_PROVIDER=ollama
+LLM_MODEL=llama3.1
+OLLAMA_URL=http://host.docker.internal:11434
+```
+
+Outros modelos disponíveis: `gemma3`, `phi3`, `mistral`, `deepseek-coder-v2`.
+
+### OpenAI
+
+```env
+LLM_PROVIDER=openai
+OPENAI_API_KEY=sk-...
+OPENAI_MODEL=gpt-4o-mini
+```
+
+### Google Gemini
+
+```env
+LLM_PROVIDER=gemini
+GEMINI_API_KEY=AIza...
+GEMINI_MODEL=gemini-3.5-flash
+```
+
+Outros modelos Gemini disponíveis: `gemini-2.5-flash`, `gemini-2.5-pro`, `gemini-3.1-flash-lite`.
+
+---
+
+## Como funciona o RAG
+
+```
+Pergunta do usuário
+      │
+      ▼
+Embedding da pergunta (SentenceTransformers — roda no container)
+      │
+      ▼
+Cosine Similarity contra embeddings da camada Silver
+      │
+      ▼
+TOP-K chunks mais relevantes (padrão: 3)
+      │
+      ▼
+Prompt estruturado em português + contexto dos chunks
+      │
+      ▼
+LLM escolhido (OpenAI / Gemini / Ollama) gera a resposta
+      │
+      ▼
+Resposta fundamentada nos documentos
+```
+
+O modelo responde **apenas com base no conteúdo dos documentos**. Se a informação não estiver nos documentos, o modelo informa explicitamente.
+
+---
+
+## Modelos dbt
+
+| Modelo | Tipo | Descrição |
+|---|---|---|
+| `stg_documents_enriched` | view | Staging normalizado dos documentos enriquecidos |
+| `mart_documents_by_topic` | table | Métricas analíticas por tópico (para Superset) |
+| `mart_document_summaries` | table | Sumarizações prontas para RAG e busca semântica |
+
+```bash
+# Executar modelos e testes
+cd dbt_project
+dbt run --profiles-dir .
+dbt test --profiles-dir .
+```
+
+---
+
+## Requisitos de Hardware
+
+| Configuração | RAM | Disco | Observação |
+|---|---|---|---|
+| Mínima | 16 GB | 20 GB | Sem Ollama local |
+| Recomendada | 32 GB | 40 GB | Com Ollama local |
+| Ideal | 32 GB + GPU | 60 GB | GPU acelera embeddings |
+
+---
+
+## Solução de Problemas
+
+**Containers não sobem / ficam em `unhealthy`**
+```bash
+make logs          # Verifique os logs
+make down && make up  # Reinicie tudo
+```
+
+**Erro de memória no Spark**
+Edite `spark-connect/conf/spark-defaults.conf` e reduza `spark.executor.memory`.
+
+**Ollama não responde**
+Verifique se o Ollama está rodando no host: `ollama list`. O container acessa via `host.docker.internal:11434`.
+
+**Modelo HuggingFace não baixa**
+Os modelos são baixados automaticamente na primeira execução. Verifique a conexão com a internet e o espaço em disco.
+
+---
+
+## Licença
+
+MIT License — veja [LICENSE](LICENSE) para detalhes.

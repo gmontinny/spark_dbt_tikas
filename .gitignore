@@ -1,0 +1,35 @@
+# Credenciais — NUNCA commitar
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+*.egg-info/
+
+# uv
+.python-version
+
+# dbt
+dbt_project/target/
+dbt_project/logs/
+dbt_project/.user.yml
+
+# Spark / dados locais
+minio_data/
+spark-warehouse/
+
+# IDEs
+.vscode/
+.idea/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Modelos HuggingFace (grandes demais para o repo)
+models/
+*.bin
+*.safetensors

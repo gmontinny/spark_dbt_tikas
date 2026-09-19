@@ -21,7 +21,8 @@ COPY pyproject.toml uv.lock README.md ./
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv export --frozen --no-dev --no-hashes --no-editable -o /tmp/req.txt && \
-    uv pip install --system -r /tmp/req.txt
+    uv pip install --system -r /tmp/req.txt && \
+    pip install openai -q
 
 COPY . .
 

@@ -229,6 +229,7 @@ services:
     environment:
       - SPARK_CONNECT_URL=sc://spark-connect:15002
       - TIKA_SERVER_JAR=http://tika-server:9998
+      - PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=python
     env_file:
       - .env
     ports:
