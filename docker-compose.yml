@@ -265,6 +265,13 @@ services:
     environment:
       - SPARK_NO_DAEMONIZE=true
       - TIKA_SERVER_JAR=http://tika-server:9998
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
     ports:
       - "15002:15002"
       - "4040-4045:4040-4045"

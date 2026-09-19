@@ -38,12 +38,14 @@ def _clean_text(text: str) -> str:
 
 
 def _embed(text: str) -> list[float]:
+    import torch
     from functools import lru_cache
     from sentence_transformers import SentenceTransformer
 
     @lru_cache(maxsize=1)
     def _get_model(name: str):
-        return SentenceTransformer(name)
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        return SentenceTransformer(name, device=device)
 
     return _get_model(EMBEDDING_MODEL).encode(text[:2048], normalize_embeddings=True).tolist()
 

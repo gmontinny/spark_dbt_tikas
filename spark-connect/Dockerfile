@@ -13,9 +13,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       zstandard==0.23.0 \
       requests==2.32.3 \
       tika==2.6.0 \
-      sentence-transformers==3.4.1 \
-      torch==2.5.1 \
-      transformers==4.51.3 \
       numpy==1.26.4 \
       mysql-connector-python==9.3.0 && \
     ln -sf /usr/bin/python3 /usr/bin/python && \

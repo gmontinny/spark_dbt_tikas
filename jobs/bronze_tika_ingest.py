@@ -29,7 +29,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 log = logging.getLogger(__name__)
 
 SPARK_URL = os.getenv("SPARK_CONNECT_URL", "sc://localhost:15002")
-DATAS_DIR = Path(os.getenv("DATAS_DIR", "/opt/spark/work-dir/datas"))
+DATAS_DIR = Path(os.getenv("DATAS_DIR", "/workspace/datas"))
 TIKA_ENDPOINT = os.getenv("TIKA_SERVER_JAR", "http://tika-server:9998")
 BRONZE_PATH = "s3a://warehouse/bronze/documents"
 DATABASE = "bronze"

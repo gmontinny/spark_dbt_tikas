@@ -33,14 +33,16 @@ STARROCKS_DB = os.getenv("STARROCKS_DB", "gold")
 TOPICS = ["economia", "imóveis", "inflação", "mercado financeiro", "política", "tecnologia"]
 
 
-def _get_conn():
+def _get_conn(database: str = ""):
     import mysql.connector
-    return mysql.connector.connect(
+    kwargs = dict(
         host=STARROCKS_HOST, port=int(STARROCKS_PORT),
         user=STARROCKS_USER,
         password=os.getenv("STARROCKS_PASSWORD", ""),
-        database=STARROCKS_DB,
     )
+    if database:
+        kwargs["database"] = database
+    return mysql.connector.connect(**kwargs)
 
 
 def _ensure_starrocks_table() -> None:
@@ -100,7 +102,7 @@ def _upsert_batch(rows: list[tuple]) -> None:
              text_length, topic, summary, ingested_at, processed_at, enriched_at)
         VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
     """
-    with _get_conn() as conn:
+    with _get_conn(STARROCKS_DB) as conn:
         cur = conn.cursor()
         try:
             cur.execute(f"USE {STARROCKS_DB}")
@@ -112,22 +114,32 @@ def _upsert_batch(rows: list[tuple]) -> None:
 
 
 def _build_pipelines():
-    """Carrega os modelos uma única vez no driver."""
+    """Carrega os modelos uma única vez no driver, priorizando GPU."""
+    import torch
     from transformers import BartForConditionalGeneration, BartTokenizer, pipeline
+
+    device = 0 if torch.cuda.is_available() else -1
+    device_name = "cuda:0" if device == 0 else "cpu"
+    log.info("🖥️  Dispositivo de inferência: %s", device_name)
 
     tokenizer = BartTokenizer.from_pretrained(SUMMARIZER_MODEL)
     model = BartForConditionalGeneration.from_pretrained(SUMMARIZER_MODEL)
-    classifier = pipeline("zero-shot-classification", model=CLASSIFIER_MODEL)
+    if device == 0:
+        model = model.cuda()
+    classifier = pipeline("zero-shot-classification", model=CLASSIFIER_MODEL, device=device)
     return (tokenizer, model), classifier
 
 
 def _summarize(summarizer, text: str) -> str:
     if not text or len(text) < 100:
         return text or ""
+    import torch
     tokenizer, model = summarizer
+    device = next(model.parameters()).device
     inputs = tokenizer(
         text[:1024], return_tensors="pt", truncation=True, max_length=1024
     )
+    inputs = {k: v.to(device) for k, v in inputs.items()}
     summary_ids = model.generate(
         inputs["input_ids"],
         max_new_tokens=130,

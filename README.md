@@ -43,9 +43,9 @@ Os embeddings são gerados com o modelo **PORTULAN/serafim-100m-portuguese-pt-se
 │  ├── Limpeza e normalização de texto (UDF distribuída)                  │
 │  │   └── Remove artefatos de PDF, espaços, caracteres especiais        │
 │  ├── TF-IDF via Spark MLlib (HashingTF + IDF)                          │
-│  └── Embeddings semânticos em português                                 │
+│  └── Embeddings semânticos em português (GPU prioritário)               │
 │      └── PORTULAN/serafim-100m-portuguese-pt-sentence-encoder          │
-│          (modelo especializado em português — GPU acelerado)            │
+│          (modelo especializado em português — CUDA → CPU fallback)      │
 │                                                                         │
 │  Spark 4.x Connect → Parquet → MinIO (s3a://warehouse/silver)          │
 │  Catálogo: hive.silver.documents_features  (consultável via Trino)     │
@@ -55,8 +55,8 @@ Os embeddings são gerados com o modelo **PORTULAN/serafim-100m-portuguese-pt-se
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                          CAMADA GOLD                                    │
 │                                                                         │
-│  Spark 4.x — Inferência com LLMs                                       │
-│  ├── Sumarização (facebook/bart-large-cnn)                              │
+│  Spark 4.x — Inferência com LLMs (GPU prioritário)                     │
+│  ├── Sumarização (facebook/bart-large-cnn — CUDA → CPU fallback)       │
 │  └── Classificação zero-shot (cross-encoder/nli-MiniLM2-L6-H768)       │
 │                                                                         │
 │  Escrita via mysql-connector-python → StarRocks OLAP (:9030)           │
@@ -107,6 +107,7 @@ Os embeddings são gerados com o modelo **PORTULAN/serafim-100m-portuguese-pt-se
 | Modelagem analítica | dbt (adapter starrocks) |
 | Streaming | Apache Kafka + Spark Structured Streaming |
 | Embeddings (português) | PORTULAN serafim-100m (HuggingFace) |
+| Inferência GPU/CPU | PyTorch + CUDA (GPU prioritário, CPU fallback) |
 | LLM — geração de texto | OpenAI GPT-4o-mini / Google Gemini / Ollama |
 | Interface RAG | Streamlit |
 | Dashboards | Apache Superset |
@@ -124,7 +125,12 @@ Os embeddings são gerados com o modelo **PORTULAN/serafim-100m-portuguese-pt-se
 - 20 GB de espaço em disco
 
 ### GPU (opcional, mas recomendado)
-O projeto detecta automaticamente a GPU via CUDA. Se disponível, os embeddings são gerados na GPU — significativamente mais rápido. O `docker-compose.yml` já está configurado com `deploy.resources` para passar a GPU NVIDIA ao container.
+O projeto detecta automaticamente a GPU via CUDA em todos os estágios de inferência. Se disponível, embeddings (Silver), sumarização e classificação (Gold), e o embedding do RAG são executados na GPU — significativamente mais rápido. O `docker-compose.yml` já está configurado com `deploy.resources` para passar a GPU NVIDIA ao container.
+
+A ordem de prioridade é sempre: **GPU (CUDA) → CPU**. Na camada Gold, o log confirma o dispositivo em uso:
+```
+🖥️  Dispositivo de inferência: cuda:0
+```
 
 Requisito: [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html) instalado no host.
 
@@ -175,7 +181,7 @@ make up
 ### 4. Execute o pipeline completo
 
 ```bash
-# Bronze → Silver → Gold (extração, embeddings, inferência LLM)
+# Bronze → Silver → Gold (extração, embeddings GPU, inferência LLM GPU)
 make pipeline-tika
 
 # Transformações dbt (marts analíticos no StarRocks)
@@ -211,17 +217,17 @@ O pipeline detecta automaticamente os novos arquivos.
 make help              # Lista todos os comandos disponíveis
 make up                # Sobe todos os serviços
 make down              # Para todos os serviços
+make rebuild           # Rebuild completo das imagens e reinicia
+make logs              # Logs de todos os containers (follow)
 make pipeline-tika     # Pipeline completo: Bronze → Silver → Gold
-make bronze            # Apenas extração Tika
-make silver            # Apenas features + embeddings
-make gold              # Apenas inferência LLM → StarRocks
+make bronze            # Apenas extração Tika → MinIO
+make silver            # Apenas features + embeddings (GPU)
+make gold              # Apenas sumarização + classificação (GPU)
 make dbt-tika          # Transformações dbt + testes de qualidade
 make app               # Interface RAG (Streamlit)
 make streaming         # Inferência contínua via Kafka
 make finetune          # Fine-tuning distribuído (TorchDistributor)
 make rag Q="pergunta"  # Pergunta via CLI (sem interface web)
-make logs              # Logs de todos os containers
-make rebuild           # Rebuild completo das imagens
 ```
 
 ---
@@ -428,9 +434,9 @@ dbt test --profiles-dir .
 
 | Configuração | RAM | Disco | Observação |
 |---|---|---|---|
-| Mínima | 16 GB | 20 GB | Sem Ollama local, sem GPU |
-| Recomendada | 32 GB | 40 GB | Com Ollama local |
-| Ideal | 32 GB + GPU NVIDIA | 60 GB | GPU acelera embeddings (RTX 3060+) |
+| Mínima | 16 GB | 20 GB | Sem Ollama local, sem GPU — inferência na CPU |
+| Recomendada | 32 GB | 40 GB | Com Ollama local — inferência na CPU |
+| Ideal | 32 GB + GPU NVIDIA | 60 GB | GPU acelera embeddings, sumarização e classificação (RTX 3060+) |
 
 ---
 
@@ -446,7 +452,11 @@ make down && make up
 Edite `spark-connect/conf/spark-defaults.conf` e reduza `spark.executor.memory`.
 
 **GPU não detectada no container**
-Verifique se o [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html) está instalado e reinicie o Docker Desktop.
+Verifique se o [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html) está instalado e reinicie o Docker Desktop. Para confirmar que a GPU está sendo usada, observe o log da camada Gold:
+```
+🖥️  Dispositivo de inferência: cuda:0   ← GPU ativa
+🖥️  Dispositivo de inferência: cpu      ← GPU não detectada
+```
 
 **Ollama não responde**
 Verifique se o Ollama está rodando no host: `ollama list`. O container acessa via `host.docker.internal:11434`.

@@ -43,8 +43,10 @@ def _cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
 
 
 def _embed_query(question: str) -> np.ndarray:
+    import torch
     from sentence_transformers import SentenceTransformer
-    model = SentenceTransformer(EMBEDDING_MODEL)
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    model = SentenceTransformer(EMBEDDING_MODEL, device=device)
     return model.encode(question, normalize_embeddings=True)
 
 

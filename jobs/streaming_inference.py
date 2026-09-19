@@ -45,15 +45,29 @@ MESSAGE_SCHEMA = StructType([
 ])
 
 
+def _get_conn(database: str = ""):
+    import mysql.connector
+    kwargs = dict(
+        host=STARROCKS_HOST, port=int(STARROCKS_PORT),
+        user=STARROCKS_USER,
+        password=os.getenv("STARROCKS_PASSWORD", ""),
+    )
+    if database:
+        kwargs["database"] = database
+    return mysql.connector.connect(**kwargs)
+
+
 def _classify(text: str) -> str:
     if not text:
         return "desconhecido"
+    import torch
     from functools import lru_cache
     from transformers import pipeline
 
     @lru_cache(maxsize=1)
     def _get_classifier(name: str):
-        return pipeline("zero-shot-classification", model=name)
+        device = 0 if torch.cuda.is_available() else -1
+        return pipeline("zero-shot-classification", model=name, device=device)
 
     return _get_classifier(CLASSIFIER_MODEL)(text[:512], candidate_labels=TOPICS, truncation=True)["labels"][0]
 
@@ -79,11 +93,7 @@ def _write_to_starrocks(batch_df, batch_id: int) -> None:
         (r["file_name"], r["content_type"], r["title"], r["topic"], _ts(r["classified_at"]))
         for r in batch_df.toPandas().to_dict("records")
     ]
-    with mysql.connector.connect(
-        host=STARROCKS_HOST, port=int(STARROCKS_PORT),
-        user=STARROCKS_USER,
-        password=os.getenv("STARROCKS_PASSWORD", ""),
-    ) as conn:
+    with _get_conn(STARROCKS_DB) as conn:
         cur = conn.cursor()
         try:
             cur.execute(f"USE {STARROCKS_DB}")
@@ -96,12 +106,7 @@ def _write_to_starrocks(batch_df, batch_id: int) -> None:
 
 
 def _ensure_stream_table() -> None:
-    import mysql.connector
-    with mysql.connector.connect(
-        host=STARROCKS_HOST, port=int(STARROCKS_PORT),
-        user=STARROCKS_USER,
-        password=os.getenv("STARROCKS_PASSWORD", ""),
-    ) as conn:
+    with _get_conn() as conn:
         cur = conn.cursor()
         try:
             cur.execute(f"CREATE DATABASE IF NOT EXISTS {STARROCKS_DB}")
